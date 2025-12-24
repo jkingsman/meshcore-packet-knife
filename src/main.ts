@@ -764,12 +764,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     analyze();
   });
 
-  const demoBtn = document.getElementById('demo-btn') as HTMLButtonElement;
-  demoBtn.addEventListener('click', () => {
+  const demoBtn1 = document.getElementById('demo-btn-1') as HTMLButtonElement;
+  demoBtn1.addEventListener('click', () => {
     packetInput.value =
       '150013CA60BF7C841CA46BFC7A23021C814FD3AA8DEC007457CD7A6733F2D1B8E99FCC1AFDEBC21B2D8A451342F8CE1370818E6308';
     roomInput.value = 'aa';
     keyInput.value = deriveKeyFromRoomName('#aa');
+    updateRoomPrefix();
+    analyze();
+  });
+
+  const demoBtn2 = document.getElementById('demo-btn-2') as HTMLButtonElement;
+  demoBtn2.addEventListener('click', () => {
+    packetInput.value =
+      '1500E69C7A89DD0AF6A2D69F5823B88F9720731E4B887C56932BF889255D8D926D99195927144323A42DD8A158F878B518B8304DF55E80501C7D02A9FFD578D3518283156BBA257BF8413E80A237393B2E4149BBBC864371140A9BBC4E23EB9BF203EF0D029214B3E3AAC3C0295690ACDB89A28619E7E5F22C83E16073AD679D25FA904D07E5ACF1DB5A7C77D7E1719FB9AE5BF55541EE0D7F59ED890E12CF0FEED6700818';
+    roomInput.value = '';
+    keyInput.value = '';
     updateRoomPrefix();
     analyze();
   });
