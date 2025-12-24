@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MeshCore Packet Knife</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+      color: #333;
+    }
+    h1 { margin-bottom: 20px; font-size: 1.5em; }
+    .input-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+    textarea, input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 14px;
+    }
+    textarea {
+      height: 80px;
+      resize: vertical;
+    }
+    .key-inputs {
+      display: flex;
+      gap: 15px;
+    }
+    .key-inputs .input-group {
+      flex: 1;
+    }
+    .room-input {
+      display: flex;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .room-input input {
+      border: none;
+      border-radius: 0;
+      flex: 1;
+    }
+    .room-prefix {
+      padding: 10px 0 10px 10px;
+      background: white;
+      font-family: monospace;
+      font-size: 14px;
+      color: #333;
+    }
+    button {
+      padding: 10px 16px;
+      background: #333;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover:not(:disabled) { background: #555; }
+    button:disabled { background: #999; cursor: not-allowed; }
+    button.running { background: #a33; }
+    button.running:hover { background: #c44; }
+    .inline-btn {
+      padding: 2px 8px;
+      font-size: 12px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .brute-section {
+      margin-top: 15px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background: #fafafa;
+    }
+    .brute-section summary {
+      padding: 10px 15px;
+      cursor: pointer;
+      font-weight: 500;
+      user-select: none;
+    }
+    .brute-section summary:hover { background: #f0f0f0; }
+    .brute-content {
+      padding: 15px;
+      border-top: 1px solid #ccc;
+    }
+    .brute-desc {
+      margin: 0 0 10px 0;
+      font-size: 13px;
+      color: #666;
+    }
+    .brute-status {
+      margin-top: 10px;
+      padding: 10px;
+      background: #e8e8e8;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 13px;
+    }
+    .brute-status:empty { display: none; }
+    .brute-status .stat { margin: 3px 0; }
+    .brute-status .found { color: #080; font-weight: bold; font-size: 26px; animation: blink 1s ease-in-out infinite; }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    .brute-option-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .brute-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .gpu-toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .gpu-toggle-label input[type="checkbox"] {
+      cursor: pointer;
+    }
+    .gpu-toggle-label input[type="checkbox"]:disabled {
+      cursor: not-allowed;
+    }
+    .gpu-toggle-label input[type="checkbox"]:disabled + span {
+      color: #999;
+    }
+    .gpu-status {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 3px;
+      background: #e8e8e8;
+    }
+    .resume-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .resume-row label {
+      margin: 0;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .resume-input {
+      flex: 1;
+      max-width: 300px;
+    }
+    .resume-input input {
+      font-size: 13px;
+      padding: 6px 8px;
+    }
+    .output {
+      margin-top: 20px;
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 15px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      font-size: 13px;
+      overflow-y: auto;
+    }
+    .columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    .column {
+      min-width: 0;
+    }
+    @media (max-width: 800px) {
+      .columns { grid-template-columns: 1fr; }
+    }
+    .error { color: #c00; }
+    .success { color: #080; }
+    .warning { color: #a50; }
+    .muted { color: #666; }
+    .section { margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; }
+    .section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+    .section-title { font-weight: bold; margin-bottom: 8px; }
+    .field { margin: 3px 0; word-break: break-all; }
+    .field-name { color: #666; }
+    .footer {
+      margin-top: 30px;
+      padding: 15px 0;
+      border-top: 1px solid #ccc;
+      font-size: 12px;
+      color: #666;
+      line-height: 1.5;
+    }
+    .footer a {
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <h1>MeshCore Packet Knife</h1>
+
+  <div class="input-group">
+    <label for="packet">Packet (hex)</label>
+    <textarea id="packet" placeholder="Paste hex packet data here..."></textarea>
+  </div>
+
+  <div class="key-inputs">
+    <div class="input-group">
+      <label for="key">Key (hex, optional)</label>
+      <input type="text" id="key" placeholder="e.g. 9cd8fcf22a47333b591d96a2b848b73f">
+    </div>
+    <div class="input-group">
+      <label for="room">Room name (generates key) <button type="button" id="public-btn" class="inline-btn">Use public room key</button></label>
+      <div class="room-input">
+        <span class="room-prefix">#</span>
+        <input type="text" id="room" placeholder="test">
+      </div>
+    </div>
+  </div>
+
+  <details id="brute-section" class="brute-section">
+    <summary>Brute Force</summary>
+    <div class="brute-content">
+      <p class="brute-desc">Search for the room name by trying all valid combinations. Only works for #channel rooms (not private keys). GPU mode uses WebGPU for parallel SHA256 computation. CPU mode is affected by browser throttling when backgrounded.</p>
+      <p class="brute-desc">Assumes room names start with #, use only a-z, 0-9, and dash. Dashes cannot be leading, trailing, or consecutive.</p>
+      <div class="brute-option-row">
+        <label class="gpu-toggle-label">
+          <input type="checkbox" id="gpu-toggle" checked>
+          <span>Use GPU</span>
+        </label>
+        <span id="gpu-status" class="gpu-status"></span>
+      </div>
+      <div class="brute-option-row">
+        <label class="gpu-toggle-label">
+          <input type="checkbox" id="timestamp-filter" checked>
+          <span>Ignore keys that result in a decrypted timestamp of >1 month ago</span>
+        </label>
+      </div>
+      <div class="brute-option-row">
+        <label class="gpu-toggle-label">
+          <input type="checkbox" id="unicode-filter" checked>
+          <span>Ignore keys resulting in invalid UTF-8</span>
+        </label>
+      </div>
+      <div class="resume-row">
+        <label for="resume-from">Resume from:</label>
+        <div class="room-input resume-input">
+          <span class="room-prefix">#</span>
+          <input type="text" id="resume-from" placeholder="(start from beginning)">
+        </div>
+      </div>
+      <div class="brute-controls">
+        <button id="brute-btn" type="button" disabled>Start</button>
+        <button id="brute-skip-btn" type="button" style="display: none;">Skip (MAC collision)</button>
+      </div>
+      <div id="brute-status" class="brute-status"></div>
+    </div>
+  </details>
+
+  <div id="output" class="output" style="display: none;"></div>
+
+  <footer class="footer">
+    This site is a wrapper around the tremendous and hard work by Michael Hart in <a href="https://github.com/michaelhart/meshcore-decoder">meshcore-decoder</a>, used under MIT license. The "original" portions and "glue" of this wrapper were exclusively developed via LLM, overseen by Jack Kingsman. Although this site is free, and ad-free, forever, and released under MIT license at <a href="https://github.com/jkingsman/meshcore-packet-knife">github.com/jkingsman/meshcore-packet-knife</a>, the author would like to go to great lengths to clarify that he claims nearly zero credit for any of the work put into this project.
+  </footer>
+
+  <script src="dist/bundle.js"></script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "name": "meshcore-packet-knife",
+  "version": "1.0.0",
+  "description": "Web-based MeshCore packet knife",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --platform=browser --target=es2020 && cp index.html dist/",
+    "watch": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --platform=browser --target=es2020 --watch",
+    "serve": "npx serve .",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@michaelhart/meshcore-decoder": "^0.2.7",
+    "crypto-js": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/crypto-js": "^4.2.2",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.9.2",
+    "vitest": "^4.0.16"
+  }
+}
