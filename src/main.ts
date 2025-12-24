@@ -469,6 +469,8 @@ function formatPayload(decoded: any, keyUsed: string | null, isEncryptedPayload:
       '<div class="field warning">Decryption failed - key may be incorrect or channel hash mismatch</div>';
   }
 
+  const blockFields = ['ciphertext', 'payload', 'rawPayload'];
+
   for (const [key, value] of Object.entries(decoded)) {
     if (key === 'segments') {
       continue;
@@ -483,7 +485,11 @@ function formatPayload(decoded: any, keyUsed: string | null, isEncryptedPayload:
       displayValue = String(value);
     }
 
-    html += `<div class="field"><span class="field-name">${escapeHtml(key)}:</span> ${escapeHtml(displayValue)}</div>`;
+    if (blockFields.includes(key)) {
+      html += `<div class="field field-block"><span class="field-name">${escapeHtml(key)}:</span><span class="field-value">${escapeHtml(displayValue)}</span></div>`;
+    } else {
+      html += `<div class="field"><span class="field-name">${escapeHtml(key)}:</span> ${escapeHtml(displayValue)}</div>`;
+    }
   }
 
   return html;
@@ -528,6 +534,9 @@ function formatOutput(
     decodedPayloadHtml +
     errorsHtml;
 
+  const isBlockField = (name: string) =>
+    /payload|ciphertext/i.test(name) && !/type|version|hash/i.test(name);
+
   const structureHtml = structure.segments?.length
     ? '<div class="section">' +
       '<div class="section-title">Structure Breakdown</div>' +
@@ -544,6 +553,14 @@ function formatOutput(
               )
               .join('') || '';
 
+          if (isBlockField(seg.name)) {
+            return (
+              '<div class="field field-block">' +
+              `<span class="field-name"${titleAttr}>[${seg.startByte}-${seg.endByte}] ${seg.name}:</span><span class="field-value">${escapeHtml(seg.value)}</span>` +
+              '</div>' +
+              headerFields
+            );
+          }
           return (
             '<div class="field">' +
             `<span class="field-name"${titleAttr}>[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(seg.value)}` +
@@ -561,6 +578,13 @@ function formatOutput(
       structure.payload.segments
         .map((seg) => {
           const titleAttr = seg.description ? ` title="${escapeHtml(seg.description)}"` : '';
+          if (isBlockField(seg.name)) {
+            return (
+              '<div class="field field-block">' +
+              `<span class="field-name"${titleAttr}>[${seg.startByte}-${seg.endByte}] ${seg.name}:</span><span class="field-value">${escapeHtml(String(seg.value))}</span>` +
+              '</div>'
+            );
+          }
           return (
             '<div class="field">' +
             `<span class="field-name"${titleAttr}>[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(String(seg.value))}` +
@@ -733,6 +757,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   publicBtn.addEventListener('click', () => {
     roomInput.value = PUBLIC_ROOM_NAME;
     keyInput.value = PUBLIC_KEY;
+    updateRoomPrefix();
+    analyze();
+  });
+
+  const demoBtn = document.getElementById('demo-btn') as HTMLButtonElement;
+  demoBtn.addEventListener('click', () => {
+    packetInput.value =
+      '150013CA60BF7C841CA46BFC7A23021C814FD3AA8DEC007457CD7A6733F2D1B8E99FCC1AFDEBC21B2D8A451342F8CE1370818E6308';
+    roomInput.value = 'aa';
+    keyInput.value = deriveKeyFromRoomName('#aa');
     updateRoomPrefix();
     analyze();
   });

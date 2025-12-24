@@ -11515,6 +11515,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (keyUsed && isEncryptedPayload) {
       html += '<div class="field warning">Decryption failed - key may be incorrect or channel hash mismatch</div>';
     }
+    const blockFields = ["ciphertext", "payload", "rawPayload"];
     for (const [key, value] of Object.entries(decoded)) {
       if (key === "segments") {
         continue;
@@ -11527,7 +11528,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       } else {
         displayValue = String(value);
       }
-      html += `<div class="field"><span class="field-name">${escapeHtml(key)}:</span> ${escapeHtml(displayValue)}</div>`;
+      if (blockFields.includes(key)) {
+        html += `<div class="field field-block"><span class="field-name">${escapeHtml(key)}:</span><span class="field-value">${escapeHtml(displayValue)}</span></div>`;
+      } else {
+        html += `<div class="field"><span class="field-name">${escapeHtml(key)}:</span> ${escapeHtml(displayValue)}</div>`;
+      }
     }
     return html;
   }
@@ -11537,15 +11542,22 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     const decodedPayloadHtml = packet.payload?.decoded ? '<div class="section"><div class="section-title">Decoded Payload</div>' + formatPayload(packet.payload.decoded, keyUsed, isEncryptedPayload) + "</div>" : "";
     const errorsHtml = !packet.isValid && packet.errors ? '<div class="section"><div class="section-title error">Validation Errors</div>' + packet.errors.map((err2) => `<div class="field error">${escapeHtml(err2)}</div>`).join("") + "</div>" : "";
     const leftCol = `<div class="section"><div class="section-title">Packet Header</div><div class="field"><span class="field-name">Route Type:</span> ${import_meshcore_decoder.Utils.getRouteTypeName(packet.routeType)}</div><div class="field"><span class="field-name">Payload Type:</span> ${import_meshcore_decoder.Utils.getPayloadTypeName(packet.payloadType)}</div><div class="field"><span class="field-name">Version:</span> ${packet.payloadVersion}</div><div class="field"><span class="field-name">Message Hash:</span> ${packet.messageHash}</div><div class="field"><span class="field-name">Total Bytes:</span> ${packet.totalBytes}</div>` + pathHtml + "</div>" + decodedPayloadHtml + errorsHtml;
+    const isBlockField = (name) => /payload|ciphertext/i.test(name) && !/type|version|hash/i.test(name);
     const structureHtml = structure.segments?.length ? '<div class="section"><div class="section-title">Structure Breakdown</div>' + structure.segments.map((seg) => {
       const titleAttr = seg.description ? ` title="${escapeHtml(seg.description)}"` : "";
       const headerFields = seg.headerBreakdown?.fields.map(
         (field) => `<div class="field" style="margin-left: 20px;"><span class="muted">bits ${field.bits}:</span> ${field.field} = ${escapeHtml(field.value)}</div>`
       ).join("") || "";
+      if (isBlockField(seg.name)) {
+        return `<div class="field field-block"><span class="field-name"${titleAttr}>[${seg.startByte}-${seg.endByte}] ${seg.name}:</span><span class="field-value">${escapeHtml(seg.value)}</span></div>` + headerFields;
+      }
       return `<div class="field"><span class="field-name"${titleAttr}>[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(seg.value)}</div>` + headerFields;
     }).join("") + "</div>" : "";
     const payloadBreakdownHtml = structure.payload?.segments?.length ? `<div class="section"><div class="section-title">Payload Breakdown (${structure.payload.type})</div>` + structure.payload.segments.map((seg) => {
       const titleAttr = seg.description ? ` title="${escapeHtml(seg.description)}"` : "";
+      if (isBlockField(seg.name)) {
+        return `<div class="field field-block"><span class="field-name"${titleAttr}>[${seg.startByte}-${seg.endByte}] ${seg.name}:</span><span class="field-value">${escapeHtml(String(seg.value))}</span></div>`;
+      }
       return `<div class="field"><span class="field-name"${titleAttr}>[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(String(seg.value))}</div>`;
     }).join("") + "</div>" : "";
     const rightCol = structureHtml + payloadBreakdownHtml;
@@ -11675,6 +11687,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     publicBtn.addEventListener("click", () => {
       roomInput.value = PUBLIC_ROOM_NAME;
       keyInput.value = PUBLIC_KEY;
+      updateRoomPrefix();
+      analyze();
+    });
+    const demoBtn = document.getElementById("demo-btn");
+    demoBtn.addEventListener("click", () => {
+      packetInput.value = "150013CA60BF7C841CA46BFC7A23021C814FD3AA8DEC007457CD7A6733F2D1B8E99FCC1AFDEBC21B2D8A451342F8CE1370818E6308";
+      roomInput.value = "aa";
+      keyInput.value = deriveKeyFromRoomName("#aa");
       updateRoomPrefix();
       analyze();
     });
