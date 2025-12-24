@@ -7,9 +7,6 @@ import {
 } from '@michaelhart/meshcore-decoder';
 import { getGpuBruteForce, isWebGpuSupported, GpuBruteForce } from './gpu-bruteforce';
 import {
-  CHARS,
-  CHARS_LEN,
-  CHARS_WITH_DASH,
   PUBLIC_ROOM_NAME,
   PUBLIC_KEY,
   roomNameToIndex,
@@ -17,22 +14,18 @@ import {
   deriveKeyFromRoomName,
   getChannelHash,
   verifyMac,
-  countNamesForLength,
   escapeHtml,
   isTimestampValid as coreIsTimestampValid,
   isValidUtf8 as coreIsValidUtf8,
   RoomNameGenerator,
 } from './core';
 
-
 // Brute force state
 let bruteForceRunning = false;
 let bruteForceAbort = false;
-let bruteForceSkip = false;
 let savedTargetChannelHash = '';
 let savedCiphertext = '';
 let savedCipherMac = '';
-let lastCheckedName = ''; // For resume functionality
 
 // GPU state
 let gpuInstance: GpuBruteForce | null = null;
@@ -43,12 +36,16 @@ let useUnicodeFilter = true; // Filter invalid unicode characters
 
 // Wrapper functions that respect filter toggle state
 function isTimestampValid(timestamp: number): boolean {
-  if (!useTimestampFilter) return true;
+  if (!useTimestampFilter) {
+    return true;
+  }
   return coreIsTimestampValid(timestamp);
 }
 
 function isValidUtf8(text: string): boolean {
-  if (!useUnicodeFilter) return true;
+  if (!useUnicodeFilter) {
+    return true;
+  }
   return coreIsValidUtf8(text);
 }
 
@@ -93,7 +90,12 @@ function saveResumePosition(roomName: string) {
   }
 }
 
-async function bruteForce(targetChannelHash: string, ciphertext: string, cipherMac: string, startFrom?: string): Promise<{found: boolean; roomName?: string; key?: string}> {
+async function bruteForce(
+  targetChannelHash: string,
+  ciphertext: string,
+  cipherMac: string,
+  startFrom?: string,
+): Promise<{ found: boolean; roomName?: string; key?: string }> {
   const gen = new RoomNameGenerator();
   const statusEl = document.getElementById('brute-status')!;
   const bruteBtn = document.getElementById('brute-btn') as HTMLButtonElement;
@@ -121,7 +123,6 @@ async function bruteForce(targetChannelHash: string, ciphertext: string, cipherM
 
   bruteForceRunning = true;
   bruteForceAbort = false;
-  bruteForceSkip = false;
   bruteBtn.disabled = false;
   bruteBtn.textContent = 'Stop';
   bruteBtn.classList.add('running');
@@ -190,7 +191,9 @@ async function bruteForce(targetChannelHash: string, ciphertext: string, cipherM
     }
 
     function formatTime(seconds: number): string {
-      if (seconds < 60) return `${Math.round(seconds)}s`;
+      if (seconds < 60) {
+        return `${Math.round(seconds)}s`;
+      }
       if (seconds < 3600) {
         const m = Math.floor(seconds / 60);
         const s = Math.round(seconds % 60);
@@ -198,7 +201,9 @@ async function bruteForce(targetChannelHash: string, ciphertext: string, cipherM
       }
       const h = Math.floor(seconds / 3600);
       const m = Math.floor((seconds % 3600) / 60);
-      return `${h}:${m.toString().padStart(2, '0')}:${Math.round(seconds % 60).toString().padStart(2, '0')}`;
+      return `${h}:${m.toString().padStart(2, '0')}:${Math.round(seconds % 60)
+        .toString()
+        .padStart(2, '0')}`;
     }
 
     function formatRate(rate: number): string {
@@ -208,20 +213,22 @@ async function bruteForce(targetChannelHash: string, ciphertext: string, cipherM
       return `${rate} keys/s`;
     }
 
-    function formatMatchRate(rate: number): string {
-      if (rate >= 1000) {
-        return `${(rate / 1000).toFixed(1)}k verified/s`;
-      }
-      return `${rate.toFixed(1)} verified/s`;
-    }
-
-    function updateStatus(current: string, total: number, matches: number, start: number, g: RoomNameGenerator, found: boolean) {
+    function updateStatus(
+      current: string,
+      total: number,
+      _matches: number,
+      start: number,
+      g: RoomNameGenerator,
+      found: boolean,
+    ) {
       const elapsed = (performance.now() - start) / 1000;
       const rate = Math.round(total / elapsed);
-      const matchRate = elapsed > 0 ? matches / elapsed : 0;
       const remaining = g.getRemainingInLength();
       const etaSeconds = rate > 0 ? remaining / rate : 0;
-      const pct = g.getTotalForLength() > 0 ? ((g.getTotalForLength() - remaining) / g.getTotalForLength() * 100).toFixed(1) : '0';
+      const pct =
+        g.getTotalForLength() > 0
+          ? (((g.getTotalForLength() - remaining) / g.getTotalForLength()) * 100).toFixed(1)
+          : '0';
 
       if (found) {
         statusEl.innerHTML =
@@ -259,7 +266,12 @@ async function bruteForce(targetChannelHash: string, ciphertext: string, cipherM
 }
 
 // GPU-accelerated brute force
-async function bruteForceGpu(targetChannelHash: string, ciphertext: string, cipherMac: string, startFrom?: string): Promise<{found: boolean; roomName?: string; key?: string}> {
+async function bruteForceGpu(
+  targetChannelHash: string,
+  ciphertext: string,
+  cipherMac: string,
+  startFrom?: string,
+): Promise<{ found: boolean; roomName?: string; key?: string }> {
   if (!gpuInstance) {
     throw new Error('GPU not available');
   }
@@ -282,7 +294,6 @@ async function bruteForceGpu(targetChannelHash: string, ciphertext: string, ciph
 
   const startTime = performance.now();
   let totalChecked = 0;
-  let hashMatches = 0;
   const targetHashByte = parseInt(targetChannelHash, 16);
 
   // Parse start position
@@ -301,8 +312,9 @@ async function bruteForceGpu(targetChannelHash: string, ciphertext: string, ciph
     const publicChannelHash = getChannelHash(PUBLIC_KEY);
     if (publicChannelHash === targetChannelHash) {
       if (verifyMac(ciphertext, cipherMac, PUBLIC_KEY)) {
-        statusEl.innerHTML = `<div class="stat found">Found: ${PUBLIC_ROOM_NAME}</div>` +
-          `<div class="stat">Mode: GPU accelerated</div>`;
+        statusEl.innerHTML =
+          `<div class="stat found">Found: ${PUBLIC_ROOM_NAME}</div>` +
+          '<div class="stat">Mode: GPU accelerated</div>';
         bruteForceRunning = false;
         bruteBtn.textContent = 'Start';
         bruteBtn.classList.remove('running');
@@ -314,7 +326,9 @@ async function bruteForceGpu(targetChannelHash: string, ciphertext: string, ciph
   }
 
   function formatTime(seconds: number): string {
-    if (seconds < 60) return `${Math.round(seconds)}s`;
+    if (seconds < 60) {
+      return `${Math.round(seconds)}s`;
+    }
     if (seconds < 3600) {
       const m = Math.floor(seconds / 60);
       const s = Math.round(seconds % 60);
@@ -322,7 +336,9 @@ async function bruteForceGpu(targetChannelHash: string, ciphertext: string, ciph
     }
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
-    return `${h}:${m.toString().padStart(2, '0')}:${Math.round(seconds % 60).toString().padStart(2, '0')}`;
+    return `${h}:${m.toString().padStart(2, '0')}:${Math.round(seconds % 60)
+      .toString()
+      .padStart(2, '0')}`;
   }
 
   function formatRate(rate: number): string {
@@ -335,13 +351,6 @@ async function bruteForceGpu(targetChannelHash: string, ciphertext: string, ciph
     return `${rate} keys/s`;
   }
 
-  function formatMatchRate(rate: number): string {
-    if (rate >= 1000) {
-      return `${(rate / 1000).toFixed(1)}k verified/s`;
-    }
-    return `${rate.toFixed(1)} verified/s`;
-  }
-
   const GPU_BATCH_SIZE = 65536; // 64k items per GPU dispatch
   const UPDATE_INTERVAL = 100; // ms - 10 updates per second
   let lastUpdate = performance.now();
@@ -351,7 +360,7 @@ async function bruteForceGpu(targetChannelHash: string, ciphertext: string, ciph
   // Iterate through lengths
   for (let length = startLength; length <= 20 && !bruteForceAbort; length++) {
     const totalForLength = gpuInstance.countNamesForLength(length);
-    let offset = (length === startLength) ? startOffset : 0;
+    let offset = length === startLength ? startOffset : 0;
 
     while (offset < totalForLength && !bruteForceAbort) {
       currentLength = length;
@@ -360,17 +369,22 @@ async function bruteForceGpu(targetChannelHash: string, ciphertext: string, ciph
 
       // Run GPU batch with MAC verification
       const matches = await gpuInstance.runBatch(
-        targetHashByte, length, offset, batchSize,
-        ciphertext, cipherMac
+        targetHashByte,
+        length,
+        offset,
+        batchSize,
+        ciphertext,
+        cipherMac,
       );
 
       totalChecked += batchSize;
-      hashMatches += matches.length;
 
       // Verify MAC for each match (on CPU)
       for (const matchIdx of matches) {
         const roomName = gpuInstance.indexToRoomName(matchIdx, length);
-        if (!roomName) continue;
+        if (!roomName) {
+          continue;
+        }
 
         const key = deriveKeyFromRoomName('#' + roomName);
         if (verifyMacAndTimestamp(ciphertext, cipherMac, key)) {
@@ -378,7 +392,7 @@ async function bruteForceGpu(targetChannelHash: string, ciphertext: string, ciph
           const rate = Math.round(totalChecked / elapsed);
           statusEl.innerHTML =
             `<div class="stat found">Found: #${escapeHtml(roomName)}</div>` +
-            `<div class="stat">Mode: GPU accelerated</div>` +
+            '<div class="stat">Mode: GPU accelerated</div>' +
             `<div class="stat">Checked: ${totalChecked.toLocaleString()} keys in ${formatTime(elapsed)}</div>` +
             `<div class="stat">Rate: ${formatRate(rate)}</div>`;
 
@@ -387,7 +401,8 @@ async function bruteForceGpu(targetChannelHash: string, ciphertext: string, ciph
           bruteBtn.classList.remove('running');
           skipBtn.style.display = 'inline-block';
           // Save next position after the found match for resume
-          const nextName = indexToRoomName(length, matchIdx + 1) || indexToRoomName(length + 1, 0) || '';
+          const nextName =
+            indexToRoomName(length, matchIdx + 1) || indexToRoomName(length + 1, 0) || '';
           saveResumePosition(nextName);
           return { found: true, roomName, key };
         }
@@ -402,17 +417,17 @@ async function bruteForceGpu(targetChannelHash: string, ciphertext: string, ciph
         const rate = Math.round(totalChecked / elapsed);
         const remaining = totalForLength - offset;
         const etaSeconds = rate > 0 ? remaining / rate : 0;
-        const pct = (offset / totalForLength * 100).toFixed(1);
+        const pct = ((offset / totalForLength) * 100).toFixed(1);
 
         statusEl.innerHTML =
-          `<div class="stat">Mode: GPU accelerated</div>` +
+          '<div class="stat">Mode: GPU accelerated</div>' +
           `<div class="stat">Elapsed: ${formatTime(elapsed)} | Checked: ${totalChecked.toLocaleString()} keys (${formatRate(rate)})</div>` +
           `<div class="stat">Length ${length}: ${pct}% complete, ~${formatTime(etaSeconds)} remaining</div>`;
 
         lastUpdate = now;
 
         // Yield to UI
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
     }
   }
@@ -440,20 +455,25 @@ function formatPayload(decoded: any, keyUsed: string | null, isEncryptedPayload:
       ? `<div class="field"><span class="field-name">Sender:</span> ${escapeHtml(decoded.decrypted.sender)}</div>`
       : '';
 
-    return `<div class="field success">Decrypted successfully${keyInfo}</div>` +
+    return (
+      `<div class="field success">Decrypted successfully${keyInfo}</div>` +
       `<div class="field"><span class="field-name">Timestamp:</span> ${timestamp}</div>` +
       sender +
-      `<div class="field"><span class="field-name">Message:</span> ${escapeHtml(decoded.decrypted.message)}</div>`;
+      `<div class="field"><span class="field-name">Message:</span> ${escapeHtml(decoded.decrypted.message)}</div>`
+    );
   }
 
   let html = '';
 
   if (keyUsed && isEncryptedPayload) {
-    html += `<div class="field warning">Decryption failed - key may be incorrect or channel hash mismatch</div>`;
+    html +=
+      '<div class="field warning">Decryption failed - key may be incorrect or channel hash mismatch</div>';
   }
 
   for (const [key, value] of Object.entries(decoded)) {
-    if (key === 'segments') continue;
+    if (key === 'segments') {
+      continue;
+    }
 
     let displayValue: string;
     if (typeof value === 'object' && value !== null) {
@@ -470,7 +490,11 @@ function formatPayload(decoded: any, keyUsed: string | null, isEncryptedPayload:
   return html;
 }
 
-function formatOutput(packet: DecodedPacket, structure: PacketStructure, keyUsed: string | null): string {
+function formatOutput(
+  packet: DecodedPacket,
+  structure: PacketStructure,
+  keyUsed: string | null,
+): string {
   const isEncryptedPayload = Utils.getPayloadTypeName(packet.payloadType) === 'GroupText';
 
   const pathHtml = packet.path?.length
@@ -478,61 +502,78 @@ function formatOutput(packet: DecodedPacket, structure: PacketStructure, keyUsed
     : '';
 
   const decodedPayloadHtml = packet.payload?.decoded
-    ? `<div class="section">` +
-      `<div class="section-title">Decoded Payload</div>` +
+    ? '<div class="section">' +
+      '<div class="section-title">Decoded Payload</div>' +
       formatPayload(packet.payload.decoded, keyUsed, isEncryptedPayload) +
-      `</div>`
+      '</div>'
     : '';
 
-  const errorsHtml = !packet.isValid && packet.errors
-    ? `<div class="section">` +
-      `<div class="section-title error">Validation Errors</div>` +
-      packet.errors.map(err => `<div class="field error">${escapeHtml(err)}</div>`).join('') +
-      `</div>`
-    : '';
+  const errorsHtml =
+    !packet.isValid && packet.errors
+      ? '<div class="section">' +
+        '<div class="section-title error">Validation Errors</div>' +
+        packet.errors.map((err) => `<div class="field error">${escapeHtml(err)}</div>`).join('') +
+        '</div>'
+      : '';
 
   const leftCol =
-    `<div class="section">` +
-    `<div class="section-title">Packet Header</div>` +
+    '<div class="section">' +
+    '<div class="section-title">Packet Header</div>' +
     `<div class="field"><span class="field-name">Route Type:</span> ${Utils.getRouteTypeName(packet.routeType)}</div>` +
     `<div class="field"><span class="field-name">Payload Type:</span> ${Utils.getPayloadTypeName(packet.payloadType)}</div>` +
     `<div class="field"><span class="field-name">Version:</span> ${packet.payloadVersion}</div>` +
     `<div class="field"><span class="field-name">Message Hash:</span> ${packet.messageHash}</div>` +
     `<div class="field"><span class="field-name">Total Bytes:</span> ${packet.totalBytes}</div>` +
     pathHtml +
-    `</div>` +
+    '</div>' +
     decodedPayloadHtml +
     errorsHtml;
 
   const structureHtml = structure.segments?.length
-    ? `<div class="section">` +
-      `<div class="section-title">Structure Breakdown</div>` +
-      structure.segments.map(seg => {
-        const desc = seg.description ? ` <span class="muted">(${escapeHtml(seg.description)})</span>` : '';
-        const headerFields = seg.headerBreakdown?.fields.map(field =>
-          `<div class="field" style="margin-left: 20px;">` +
-          `<span class="muted">bits ${field.bits}:</span> ${field.field} = ${escapeHtml(field.value)}` +
-          `</div>`
-        ).join('') || '';
+    ? '<div class="section">' +
+      '<div class="section-title">Structure Breakdown</div>' +
+      structure.segments
+        .map((seg) => {
+          const desc = seg.description
+            ? ` <span class="muted">(${escapeHtml(seg.description)})</span>`
+            : '';
+          const headerFields =
+            seg.headerBreakdown?.fields
+              .map(
+                (field) =>
+                  '<div class="field" style="margin-left: 20px;">' +
+                  `<span class="muted">bits ${field.bits}:</span> ${field.field} = ${escapeHtml(field.value)}` +
+                  '</div>',
+              )
+              .join('') || '';
 
-        return `<div class="field">` +
-          `<span class="field-name">[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(seg.value)}${desc}` +
-          `</div>` +
-          headerFields;
-      }).join('') +
-      `</div>`
+          return (
+            '<div class="field">' +
+            `<span class="field-name">[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(seg.value)}${desc}` +
+            '</div>' +
+            headerFields
+          );
+        })
+        .join('') +
+      '</div>'
     : '';
 
   const payloadBreakdownHtml = structure.payload?.segments?.length
-    ? `<div class="section">` +
+    ? '<div class="section">' +
       `<div class="section-title">Payload Breakdown (${structure.payload.type})</div>` +
-      structure.payload.segments.map(seg => {
-        const desc = seg.description ? ` <span class="muted">(${escapeHtml(seg.description)})</span>` : '';
-        return `<div class="field">` +
-          `<span class="field-name">[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(String(seg.value))}${desc}` +
-          `</div>`;
-      }).join('') +
-      `</div>`
+      structure.payload.segments
+        .map((seg) => {
+          const desc = seg.description
+            ? ` <span class="muted">(${escapeHtml(seg.description)})</span>`
+            : '';
+          return (
+            '<div class="field">' +
+            `<span class="field-name">[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(String(seg.value))}${desc}` +
+            '</div>'
+          );
+        })
+        .join('') +
+      '</div>'
     : '';
 
   const rightCol = structureHtml + payloadBreakdownHtml;
@@ -577,7 +618,9 @@ async function analyze(): Promise<void> {
     // Auto-detect public key if no key is provided
     if (!channelKey && !autoDetectedPublic) {
       const testKeyStore = MeshCorePacketDecoder.createKeyStore({ channelSecrets: [PUBLIC_KEY] });
-      const testPacket = await MeshCorePacketDecoder.decodeWithVerification(packetHex, { keyStore: testKeyStore });
+      const testPacket = await MeshCorePacketDecoder.decodeWithVerification(packetHex, {
+        keyStore: testKeyStore,
+      });
 
       if (testPacket.payload?.decoded?.decrypted) {
         // Public key works! Auto-populate
@@ -593,7 +636,9 @@ async function analyze(): Promise<void> {
       ? MeshCorePacketDecoder.createKeyStore({ channelSecrets: [channelKey] })
       : null;
 
-    const structure = await MeshCorePacketDecoder.analyzeStructureWithVerification(packetHex, { keyStore });
+    const structure = await MeshCorePacketDecoder.analyzeStructureWithVerification(packetHex, {
+      keyStore,
+    });
     const packet = await MeshCorePacketDecoder.decodeWithVerification(packetHex, { keyStore });
 
     lastPacket = packet;
@@ -719,15 +764,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    if (!lastPacket?.payload?.decoded) return;
+    if (!lastPacket?.payload?.decoded) {
+      return;
+    }
 
     const decoded = lastPacket.payload.decoded as any;
-    if (!decoded.channelHash || !decoded.ciphertext || !decoded.cipherMac) return;
+    if (!decoded.channelHash || !decoded.ciphertext || !decoded.cipherMac) {
+      return;
+    }
 
     // Get resume position from input
     const startFrom = resumeInput.value.trim() || undefined;
 
-    let result: {found: boolean; roomName?: string; key?: string};
+    let result: { found: boolean; roomName?: string; key?: string };
 
     if (gpuAvailable && useGpu) {
       // Use GPU-accelerated brute force
@@ -735,7 +784,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         decoded.channelHash.toLowerCase(),
         decoded.ciphertext,
         decoded.cipherMac,
-        startFrom
+        startFrom,
       );
     } else {
       // Fall back to CPU brute force
@@ -743,7 +792,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         decoded.channelHash.toLowerCase(),
         decoded.ciphertext,
         decoded.cipherMac,
-        startFrom
+        startFrom,
       );
     }
 
@@ -757,10 +806,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const skipBtn = document.getElementById('brute-skip-btn') as HTMLButtonElement;
   skipBtn.addEventListener('click', async () => {
-    if (bruteForceRunning) return;
+    if (bruteForceRunning) {
+      return;
+    }
 
     const startFrom = resumeInput.value.trim();
-    if (!startFrom) return;
+    if (!startFrom) {
+      return;
+    }
 
     // Clear the populated fields
     roomInput.value = '';
@@ -768,22 +821,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     analyze();
 
     // Resume search from saved position
-    let result: {found: boolean; roomName?: string; key?: string};
+    let result: { found: boolean; roomName?: string; key?: string };
 
     if (gpuAvailable && useGpu) {
       result = await bruteForceGpu(
         savedTargetChannelHash,
         savedCiphertext,
         savedCipherMac,
-        startFrom
+        startFrom,
       );
     } else {
-      result = await bruteForce(
-        savedTargetChannelHash,
-        savedCiphertext,
-        savedCipherMac,
-        startFrom
-      );
+      result = await bruteForce(savedTargetChannelHash, savedCiphertext, savedCipherMac, startFrom);
     }
 
     if (result.found && result.roomName && result.key) {

@@ -200,7 +200,7 @@ describe('countNamesForLength', () => {
 describe('escapeHtml', () => {
   it('should escape all dangerous characters', () => {
     expect(escapeHtml('<script>alert("xss")</script>')).toBe(
-      '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;'
+      '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;',
     );
     expect(escapeHtml("a'b")).toBe('a&#39;b');
     expect(escapeHtml('a&b')).toBe('a&amp;b');

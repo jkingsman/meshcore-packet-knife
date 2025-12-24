@@ -18,7 +18,9 @@ export const PUBLIC_KEY = '8b3387e9c5cdea6ac9e5edbaa115cd72';
  * Index encoding: LSB-first (first character = least significant digit).
  */
 export function roomNameToIndex(name: string): { length: number; index: number } | null {
-  if (!name || name.length === 0) return null;
+  if (!name || name.length === 0) {
+    return null;
+  }
 
   const length = name.length;
   let index = 0;
@@ -28,14 +30,18 @@ export function roomNameToIndex(name: string): { length: number; index: number }
   for (let i = 0; i < length; i++) {
     const c = name[i];
     const charIdx = CHARS_WITH_DASH.indexOf(c);
-    if (charIdx === -1) return null; // Invalid character
+    if (charIdx === -1) {
+      return null;
+    } // Invalid character
 
     const isFirst = i === 0;
     const isLast = i === length - 1;
-    const charCount = (isFirst || isLast) ? 36 : 37;
+    const charCount = isFirst || isLast ? 36 : 37;
 
     // Dash not allowed at start/end
-    if ((isFirst || isLast) && charIdx === 36) return null;
+    if ((isFirst || isLast) && charIdx === 36) {
+      return null;
+    }
 
     index += charIdx * multiplier;
     multiplier *= charCount;
@@ -49,7 +55,9 @@ export function roomNameToIndex(name: string): { length: number; index: number }
  * Index encoding: LSB-first (first character = least significant digit).
  */
 export function indexToRoomName(length: number, idx: number): string | null {
-  if (length <= 0) return null;
+  if (length <= 0) {
+    return null;
+  }
 
   let result = '';
   let remaining = idx;
@@ -58,12 +66,14 @@ export function indexToRoomName(length: number, idx: number): string | null {
   for (let i = 0; i < length; i++) {
     const isFirst = i === 0;
     const isLast = i === length - 1;
-    const charCount = (isFirst || isLast) ? 36 : 37;
+    const charCount = isFirst || isLast ? 36 : 37;
     const charIdx = remaining % charCount;
     remaining = Math.floor(remaining / charCount);
 
     const isDash = charIdx === 36;
-    if (isDash && prevWasDash) return null; // Invalid: consecutive dashes
+    if (isDash && prevWasDash) {
+      return null;
+    } // Invalid: consecutive dashes
     prevWasDash = isDash;
 
     result += CHARS_WITH_DASH[charIdx];
@@ -107,8 +117,12 @@ export function verifyMac(ciphertext: string, cipherMac: string, keyHex: string)
  * Accounts for dash rules (no start/end dash, no consecutive dashes).
  */
 export function countNamesForLength(len: number): number {
-  if (len === 1) return CHARS_LEN;
-  if (len === 2) return CHARS_LEN * CHARS_LEN;
+  if (len === 1) {
+    return CHARS_LEN;
+  }
+  if (len === 2) {
+    return CHARS_LEN * CHARS_LEN;
+  }
 
   // For length >= 3: first and last are CHARS (36), middle follows no-consecutive-dash rule
   // Middle length = len - 2
@@ -124,7 +138,7 @@ export function countNamesForLength(len: number): number {
     endsDash = newEndsDash;
   }
 
-  const middleCount = len > 2 ? (endsNonDash + endsDash) : 1;
+  const middleCount = len > 2 ? endsNonDash + endsDash : 1;
   return CHARS_LEN * middleCount * CHARS_LEN;
 }
 
@@ -132,8 +146,9 @@ export function countNamesForLength(len: number): number {
  * Escape HTML special characters.
  */
 export function escapeHtml(str: string): string {
-  return String(str).replace(/[&<>"']/g, c =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c)
+  return String(str).replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] || c,
   );
 }
 
@@ -164,7 +179,7 @@ export class RoomNameGenerator {
   private totalForLength = CHARS_LEN;
 
   current(): string {
-    return this.indices.map(i => i === CHARS_LEN ? '-' : CHARS[i]).join('');
+    return this.indices.map((i) => (i === CHARS_LEN ? '-' : CHARS[i])).join('');
   }
 
   getLength(): number {
@@ -188,7 +203,9 @@ export class RoomNameGenerator {
   }
 
   next(): boolean {
-    if (this.done) return false;
+    if (this.done) {
+      return false;
+    }
 
     this.currentInLength++;
 
@@ -198,7 +215,7 @@ export class RoomNameGenerator {
     while (pos >= 0) {
       const isFirst = pos === 0;
       const isLast = pos === this.length - 1;
-      const maxVal = (isFirst || isLast) ? CHARS_LEN - 1 : CHARS_LEN; // CHARS_LEN = dash index
+      const maxVal = isFirst || isLast ? CHARS_LEN - 1 : CHARS_LEN; // CHARS_LEN = dash index
 
       if (this.indices[pos] < maxVal) {
         this.indices[pos]++;
@@ -233,8 +250,12 @@ export class RoomNameGenerator {
   private isValid(): boolean {
     for (let i = 0; i < this.length; i++) {
       const isDash = this.indices[i] === CHARS_LEN;
-      if (isDash && (i === 0 || i === this.length - 1)) return false;
-      if (isDash && i > 0 && this.indices[i - 1] === CHARS_LEN) return false;
+      if (isDash && (i === 0 || i === this.length - 1)) {
+        return false;
+      }
+      if (isDash && i > 0 && this.indices[i - 1] === CHARS_LEN) {
+        return false;
+      }
     }
     return true;
   }
@@ -242,7 +263,9 @@ export class RoomNameGenerator {
   // Skip invalid combinations efficiently
   nextValid(): boolean {
     do {
-      if (!this.next()) return false;
+      if (!this.next()) {
+        return false;
+      }
     } while (!this.isValid());
     return true;
   }
@@ -259,7 +282,7 @@ export class RoomNameGenerator {
     for (let i = 0; i < targetLength; i++) {
       const isFirst = i === 0;
       const isLast = i === targetLength - 1;
-      const charCount = (isFirst || isLast) ? CHARS_LEN : CHARS_LEN + 1;
+      const charCount = isFirst || isLast ? CHARS_LEN : CHARS_LEN + 1;
       this.indices[i] = remaining % charCount;
       remaining = Math.floor(remaining / charCount);
     }

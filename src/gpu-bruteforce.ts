@@ -1,9 +1,6 @@
 // WebGPU-accelerated brute force key cracking for MeshCore packets
 
-import {
-  indexToRoomName,
-  countNamesForLength,
-} from './core';
+import { indexToRoomName, countNamesForLength } from './core';
 
 export interface GpuBruteForceResult {
   found: boolean;
@@ -24,7 +21,7 @@ export class GpuBruteForce {
   private bindGroupLayout: GPUBindGroupLayout | null = null;
 
   // Shader for SHA256 computation
-  private shaderCode = /* wgsl */`
+  private shaderCode = /* wgsl */ `
 // SHA256 round constants
 const K: array<u32, 64> = array<u32, 64>(
   0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
@@ -473,7 +470,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     batchOffset: number,
     batchSize: number,
     ciphertextHex?: string,
-    targetMacHex?: string
+    targetMacHex?: string,
   ): Promise<number[]> {
     if (!this.device || !this.pipeline || !this.bindGroupLayout) {
       throw new Error('GPU not initialized');
@@ -499,8 +496,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       padded.set(ciphertextBytes);
       ciphertextWords = new Uint32Array(paddedLen / 4);
       for (let i = 0; i < ciphertextWords.length; i++) {
-        ciphertextWords[i] = (padded[i * 4] << 24) | (padded[i * 4 + 1] << 16) |
-                            (padded[i * 4 + 2] << 8) | padded[i * 4 + 3];
+        ciphertextWords[i] =
+          (padded[i * 4] << 24) |
+          (padded[i * 4 + 1] << 16) |
+          (padded[i * 4 + 2] << 8) |
+          padded[i * 4 + 3];
       }
 
       // Parse target MAC (2 bytes in high 16 bits)
@@ -557,7 +557,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       targetMac,
       ciphertextWords.length,
       ciphertextLenBits,
-      verifyMac
+      verifyMac,
     ]);
     this.device.queue.writeBuffer(paramsBuffer, 0, paramsData);
 

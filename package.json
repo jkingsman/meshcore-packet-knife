@@ -1,11 +1,14 @@
 {
   "name": "meshcore-packet-knife",
   "version": "1.0.0",
+  "type": "module",
   "description": "Web-based MeshCore packet knife",
   "license": "MIT",
   "private": true,
   "scripts": {
-    "build": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --platform=browser --target=es2020 && cp index.html dist/",
+    "format": "prettier --write src/",
+    "lint": "eslint --fix src/",
+    "build": "npm run format && npm run lint && esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --platform=browser --target=es2020 && cp index.html dist/ && rm -rf docs && cp -r dist docs && echo 'blame github pages' > docs/what.md",
     "watch": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --platform=browser --target=es2020 --watch",
     "serve": "npx serve .",
     "test": "vitest run",
@@ -16,9 +19,16 @@
     "crypto-js": "^4.2.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/crypto-js": "^4.2.2",
+    "@typescript-eslint/eslint-plugin": "^8.50.1",
+    "@typescript-eslint/parser": "^8.50.1",
     "esbuild": "^0.24.0",
+    "eslint": "^9.39.2",
+    "globals": "^16.5.0",
+    "prettier": "^3.7.4",
     "typescript": "^5.9.2",
+    "typescript-eslint": "^8.50.1",
     "vitest": "^4.0.16"
   }
 }
