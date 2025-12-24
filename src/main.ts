@@ -905,4 +905,23 @@ document.addEventListener('DOMContentLoaded', async () => {
       analyze();
     }
   });
+
+  // Check for packet in URL query param (e.g., ?packet=ABCDEF1234...)
+  const urlParams = new URLSearchParams(window.location.search);
+  const packetFromUrl = urlParams.get('packet');
+  if (packetFromUrl && /^[0-9a-fA-F]+$/.test(packetFromUrl)) {
+    packetInput.value = packetFromUrl;
+    const bruteSection = document.getElementById('brute-section') as HTMLDetailsElement;
+    if (bruteSection) {
+      bruteSection.open = true;
+    }
+    // Analyze and start cracking
+    await analyze();
+    // Small delay to ensure UI is ready, then click brute force button
+    setTimeout(() => {
+      if (!bruteBtn.disabled) {
+        bruteBtn.click();
+      }
+    }, 100);
+  }
 });

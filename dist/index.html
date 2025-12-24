@@ -217,6 +217,30 @@
       display: block;
       margin-left: 20px;
     }
+    .bookmarklet-section {
+      margin-top: 20px;
+      padding: 12px 15px;
+      background: #e8f4e8;
+      border: 1px solid #b8d4b8;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .bookmarklet-link {
+      display: inline-block;
+      padding: 4px 10px;
+      background: #5b8fb9;
+      color: white;
+      text-decoration: none;
+      border-radius: 3px;
+      font-weight: 500;
+      margin-right: 10px;
+    }
+    .bookmarklet-link:hover {
+      background: #4a7a9e;
+    }
+    .bookmarklet-desc {
+      color: #555;
+    }
     .footer {
       margin-top: 30px;
       padding: 15px 0;
@@ -300,6 +324,11 @@
   </details>
 
   <div id="output" class="output" style="display: none;"></div>
+
+  <div class="bookmarklet-section">
+    <a class="bookmarklet-link" href="javascript:(function(){var p=prompt('Enter packet hex:');if(p&&/^[0-9a-fA-F]+$/.test(p.trim().replace(/\s+/g,''))){window.open('https://jkingsman.github.io/meshcore-packet-knife/?packet='+p.trim().replace(/\s+/g,''),'_blank')}})();">Packet Crack Bookmarklet</a>
+    <span class="bookmarklet-desc">Drag this link to your bookmarks bar. Click it on any page to enter a packet and open it in a new tab for cracking.</span>
+  </div>
 
   <footer class="footer">
     This site is a wrapper around the tremendous and hard work by Michael Hart in <a href="https://github.com/michaelhart/meshcore-decoder">meshcore-decoder</a>, used under MIT license. The "original" portions and "glue" of this wrapper were exclusively developed via LLM, overseen by Jack Kingsman. Although this site is free, and ad-free, forever, and released under MIT license at <a href="https://github.com/jkingsman/meshcore-packet-knife">github.com/jkingsman/meshcore-packet-knife</a>, the author would like to go to great lengths to clarify that he claims nearly zero credit for any of the work put into this project.
