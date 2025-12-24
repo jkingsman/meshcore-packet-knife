@@ -70,9 +70,13 @@ Depends on your GPU. All hashtag keys of length less than seven are exhaustively
 
 No, statistically speaking. Those use keys that aren't derived from short, predictable room names. The brute force approach here only works because hashtag rooms use `SHA256("#roomname")` as the key, and room names are short strings from a limited character set. Collisions are technically possible, but practically impossible. Thus, if anything, this project should nudge you towards using private messages and channels for anything you don't want the world to read!
 
-## **Is this legal?**
+## **My lord, is this... legal?**
 
-This is a security research and educational tool. Hashtag rooms are explicitly labelled as insecure/public in most clients. If this software outrages you, you're probably using hashtag rooms for things you shouldn't be. You may be noticing a theme here:
+ᴵ ʷᶦˡˡ ᵐᵃᵏᵉ ᶦᵗ ˡᵉᵍᵃˡ
+
+Just kidding.
+
+This is a security research and educational tool. This tool alone does not break laws. Hashtag rooms are explicitly labelled as insecure/public in most clients, so it's probably pretty hard to break any assumptions, let alone laws, with this tool. If this software outrages you, you're probably using hashtag rooms for things you shouldn't be. You may be noticing a theme here:
 
 *Hashtag rooms should be considered world-readable, by design. MeshCore provides fantastic, modern cryptography -- use it!!*
 
