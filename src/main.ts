@@ -83,7 +83,6 @@ function getResumeInput(): HTMLInputElement | null {
 
 // Save current position for resume
 function saveResumePosition(roomName: string) {
-  lastCheckedName = roomName;
   const resumeInput = getResumeInput();
   if (resumeInput) {
     resumeInput.value = roomName;
@@ -534,9 +533,7 @@ function formatOutput(
       '<div class="section-title">Structure Breakdown</div>' +
       structure.segments
         .map((seg) => {
-          const desc = seg.description
-            ? ` <span class="muted">(${escapeHtml(seg.description)})</span>`
-            : '';
+          const titleAttr = seg.description ? ` title="${escapeHtml(seg.description)}"` : '';
           const headerFields =
             seg.headerBreakdown?.fields
               .map(
@@ -549,7 +546,7 @@ function formatOutput(
 
           return (
             '<div class="field">' +
-            `<span class="field-name">[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(seg.value)}${desc}` +
+            `<span class="field-name"${titleAttr}>[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(seg.value)}` +
             '</div>' +
             headerFields
           );
@@ -563,12 +560,10 @@ function formatOutput(
       `<div class="section-title">Payload Breakdown (${structure.payload.type})</div>` +
       structure.payload.segments
         .map((seg) => {
-          const desc = seg.description
-            ? ` <span class="muted">(${escapeHtml(seg.description)})</span>`
-            : '';
+          const titleAttr = seg.description ? ` title="${escapeHtml(seg.description)}"` : '';
           return (
             '<div class="field">' +
-            `<span class="field-name">[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(String(seg.value))}${desc}` +
+            `<span class="field-name"${titleAttr}>[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(String(seg.value))}` +
             '</div>'
           );
         })

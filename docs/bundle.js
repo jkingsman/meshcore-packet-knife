@@ -11247,7 +11247,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     return document.getElementById("resume-from");
   }
   function saveResumePosition(roomName) {
-    lastCheckedName = roomName;
     const resumeInput = getResumeInput();
     if (resumeInput) {
       resumeInput.value = roomName;
@@ -11539,15 +11538,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     const errorsHtml = !packet.isValid && packet.errors ? '<div class="section"><div class="section-title error">Validation Errors</div>' + packet.errors.map((err2) => `<div class="field error">${escapeHtml(err2)}</div>`).join("") + "</div>" : "";
     const leftCol = `<div class="section"><div class="section-title">Packet Header</div><div class="field"><span class="field-name">Route Type:</span> ${import_meshcore_decoder.Utils.getRouteTypeName(packet.routeType)}</div><div class="field"><span class="field-name">Payload Type:</span> ${import_meshcore_decoder.Utils.getPayloadTypeName(packet.payloadType)}</div><div class="field"><span class="field-name">Version:</span> ${packet.payloadVersion}</div><div class="field"><span class="field-name">Message Hash:</span> ${packet.messageHash}</div><div class="field"><span class="field-name">Total Bytes:</span> ${packet.totalBytes}</div>` + pathHtml + "</div>" + decodedPayloadHtml + errorsHtml;
     const structureHtml = structure.segments?.length ? '<div class="section"><div class="section-title">Structure Breakdown</div>' + structure.segments.map((seg) => {
-      const desc = seg.description ? ` <span class="muted">(${escapeHtml(seg.description)})</span>` : "";
+      const titleAttr = seg.description ? ` title="${escapeHtml(seg.description)}"` : "";
       const headerFields = seg.headerBreakdown?.fields.map(
         (field) => `<div class="field" style="margin-left: 20px;"><span class="muted">bits ${field.bits}:</span> ${field.field} = ${escapeHtml(field.value)}</div>`
       ).join("") || "";
-      return `<div class="field"><span class="field-name">[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(seg.value)}${desc}</div>` + headerFields;
+      return `<div class="field"><span class="field-name"${titleAttr}>[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(seg.value)}</div>` + headerFields;
     }).join("") + "</div>" : "";
     const payloadBreakdownHtml = structure.payload?.segments?.length ? `<div class="section"><div class="section-title">Payload Breakdown (${structure.payload.type})</div>` + structure.payload.segments.map((seg) => {
-      const desc = seg.description ? ` <span class="muted">(${escapeHtml(seg.description)})</span>` : "";
-      return `<div class="field"><span class="field-name">[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(String(seg.value))}${desc}</div>`;
+      const titleAttr = seg.description ? ` title="${escapeHtml(seg.description)}"` : "";
+      return `<div class="field"><span class="field-name"${titleAttr}>[${seg.startByte}-${seg.endByte}] ${seg.name}:</span> ${escapeHtml(String(seg.value))}</div>`;
     }).join("") + "</div>" : "";
     const rightCol = structureHtml + payloadBreakdownHtml;
     return `<div class="columns"><div class="column">${leftCol}</div><div class="column">${rightCol}</div></div>`;

@@ -169,6 +169,45 @@ export function isValidUtf8(text: string): boolean {
 }
 
 /**
+ * CPU brute force search for room name.
+ * Returns the room name (without #) and key if found.
+ */
+export function cpuBruteForce(
+  targetChannelHash: string,
+  ciphertext: string,
+  cipherMac: string,
+  maxIterations = 100000,
+): { found: boolean; roomName?: string; key?: string } {
+  const gen = new RoomNameGenerator();
+
+  // Check public key first
+  const publicChannelHash = getChannelHash(PUBLIC_KEY);
+  if (publicChannelHash === targetChannelHash) {
+    if (verifyMac(ciphertext, cipherMac, PUBLIC_KEY)) {
+      return { found: true, roomName: PUBLIC_ROOM_NAME, key: PUBLIC_KEY };
+    }
+  }
+
+  for (let i = 0; i < maxIterations; i++) {
+    const roomName = gen.current();
+    const key = deriveKeyFromRoomName('#' + roomName);
+    const channelHash = getChannelHash(key);
+
+    if (channelHash === targetChannelHash) {
+      if (verifyMac(ciphertext, cipherMac, key)) {
+        return { found: true, roomName, key };
+      }
+    }
+
+    if (!gen.nextValid()) {
+      break;
+    }
+  }
+
+  return { found: false };
+}
+
+/**
  * Room name generator - iterates through all valid room names.
  */
 export class RoomNameGenerator {

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { MeshCorePacketDecoder } from '@michaelhart/meshcore-decoder';
 import {
   CHARS,
   CHARS_LEN,
@@ -15,6 +16,7 @@ import {
   isTimestampValid,
   isValidUtf8,
   RoomNameGenerator,
+  cpuBruteForce,
 } from './core';
 
 describe('constants', () => {
@@ -305,5 +307,39 @@ describe('integration: public key format', () => {
     expect(PUBLIC_KEY).toMatch(/^[0-9a-f]{32}$/);
     const hash = getChannelHash(PUBLIC_KEY);
     expect(hash).toMatch(/^[0-9a-f]{2}$/);
+  });
+});
+
+describe('end-to-end: CPU brute force', () => {
+  it('should brute force packet and find room #aa', async () => {
+    const packetHex =
+      '150013CA60BF7C841CA46BFC7A23021C814FD3AA8DEC007457CD7A6733F2D1B8E99FCC1AFDEBC21B2D8A451342F8CE1370818E6308';
+
+    // Decode the packet to extract channelHash, ciphertext, cipherMac
+    const decoded = await MeshCorePacketDecoder.decodeWithVerification(packetHex, {});
+
+    expect(decoded).not.toBeNull();
+    expect(decoded.payload).toBeDefined();
+    expect(decoded.payload.decoded).toBeDefined();
+
+    const payload = decoded.payload.decoded as {
+      channelHash: string;
+      ciphertext: string;
+      cipherMac: string;
+    };
+
+    expect(payload.channelHash).toBeDefined();
+    expect(payload.ciphertext).toBeDefined();
+    expect(payload.cipherMac).toBeDefined();
+
+    // Run brute force
+    const result = cpuBruteForce(payload.channelHash, payload.ciphertext, payload.cipherMac);
+
+    expect(result.found).toBe(true);
+    expect(result.roomName).toBe('aa');
+
+    // Verify the key is correct
+    const expectedKey = deriveKeyFromRoomName('#aa');
+    expect(result.key).toBe(expectedKey);
   });
 });
