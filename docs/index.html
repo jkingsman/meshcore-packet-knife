@@ -96,6 +96,7 @@
       cursor: pointer;
       font-weight: 500;
       user-select: none;
+      font-size: 1.2em;
     }
     .brute-section summary:hover { background: #f0f0f0; }
     .brute-content {
@@ -253,7 +254,7 @@
   <details id="brute-section" class="brute-section">
     <summary>Crack my Packet!</summary>
     <div class="brute-content">
-      <p class="brute-desc">Search for the room name by trying all valid combinations. Only works for #channel rooms (not private keys), and you can't know if a packet was a GroupMessage to a hashtag room or otherwise.</p>
+      <p class="brute-desc">Search for the room name by trying all valid combinations. Only works for #channel rooms (not private rooms with random keys), and you can't know if a packet was a GroupMessage to a hashtag room or otherwise.</p>
       <p class="brute-desc">Assumes room names start with #, use only a-z, 0-9, and dash. Dashes cannot be leading, trailing, or consecutive.</p>
       <p class="brute-desc">Cracking performance is affected by browser throttling when backgrounded; keep the window in the foreground.</p>
       <div class="brute-option-row">
