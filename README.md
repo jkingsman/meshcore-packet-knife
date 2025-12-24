@@ -64,7 +64,7 @@ Hashtag rooms have keys derived from their names, which makes them easy to share
 
 ## **How fast is the brute force?**
 
-Depends on your GPU. All hashtag keys of length less than seven are exhaustively bruteforced in about a minute on my 2023 Macbook Air.
+Depends on your GPU. All hashtag keys of length less than seven are exhaustively bruteforced in about 90s on my 2023 Macbook Air.
 
 ## **Can this crack private rooms or direct messages?**
 
