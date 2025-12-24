@@ -506,8 +506,9 @@ function formatOutput(
     ? `<div class="field"><span class="field-name">Path:</span> ${packet.path.join(' ')}</div>`
     : '';
 
+  const isDecrypted = !!packet.payload?.decoded?.decrypted;
   const decodedPayloadHtml = packet.payload?.decoded
-    ? '<div class="section">' +
+    ? `<div class="section${isDecrypted ? ' decrypted' : ''}">` +
       '<div class="section-title">Decoded Payload</div>' +
       formatPayload(packet.payload.decoded, keyUsed, isEncryptedPayload) +
       '</div>'

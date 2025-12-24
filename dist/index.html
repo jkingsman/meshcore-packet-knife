@@ -205,6 +205,7 @@
     .muted { color: #666; }
     .section { margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; }
     .section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+    .section.decrypted { padding: 10px; outline: green dashed 5px; }
     .section-title { font-weight: bold; margin-bottom: 8px; }
     .field { margin: 3px 0; word-break: break-all; }
     .field-name { color: #666; }
@@ -254,7 +255,7 @@
   <details id="brute-section" class="brute-section">
     <summary>Crack my Packet!</summary>
     <div class="brute-content">
-      <p class="brute-desc">Search for the room name by trying all valid combinations. Only works for #channel rooms (not private rooms with random keys), and you can't know if a packet was a GroupMessage to a hashtag room or otherwise. Read more about how this works in <a href="https://github.com/jkingsman/meshcore-packet-knife?tab=readme-ov-file#how-does-this-work">the README</a>.</p>
+      <p class="brute-desc">Search for the room name by trying all valid combinations. Only works for #channel rooms (not private rooms with random keys), and you can't know if a packet was a GroupText to a hashtag room or otherwise. Read more about how this works in <a href="https://github.com/jkingsman/meshcore-packet-knife?tab=readme-ov-file#how-does-this-work">the README</a>.</p>
       <p class="brute-desc">Assumes room names start with #, use only a-z, 0-9, and dash. Dashes cannot be leading, trailing, or consecutive.</p>
       <p class="brute-desc">Cracking performance is affected by browser throttling when backgrounded; keep the window in the foreground.</p>
       <p class="brute-desc"><strong>MeshCore is still secure! Nothing is hacked or broken about MeshCore due to this demo. Hashtag rooms are not considered private; this merely demonstrates that reality. MeshCore has strong, modern, secure crypto for private messages and private rooms. Use them, and not hashtag rooms, for private communications, and you're just fine.</strong></p>
