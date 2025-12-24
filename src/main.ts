@@ -57,6 +57,9 @@ function formatTime(seconds: number): string {
 }
 
 function formatRate(rate: number): string {
+  if (rate >= 1000000000) {
+    return `${(rate / 1000000000).toFixed(2)} Gkeys/s`;
+  }
   if (rate >= 1000000) {
     return `${(rate / 1000000).toFixed(2)} Mkeys/s`;
   }
@@ -66,11 +69,18 @@ function formatRate(rate: number): string {
   return `${rate} keys/s`;
 }
 
+function formatBatchSize(size: number): string {
+  if (size >= 1048576) {
+    return `${(size / 1048576).toFixed(1)}M`;
+  }
+  return `${(size / 1024).toFixed(0)}K`;
+}
+
 function getBatchInfo(currentBatchSize: number, batchSizeTuned: boolean): string {
   if (!useAutoTune) {
-    return ` | Batch: ${(FIXED_BATCH_SIZE / 1024).toFixed(0)}K (fixed)`;
+    return ` | Batch: ${formatBatchSize(FIXED_BATCH_SIZE)} (fixed)`;
   }
-  return batchSizeTuned ? ` | Batch: ${(currentBatchSize / 1024).toFixed(0)}K` : ' | Tuning...';
+  return batchSizeTuned ? ` | Batch: ${formatBatchSize(currentBatchSize)}` : ' | Tuning...';
 }
 
 // Brute force UI state helpers
