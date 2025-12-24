@@ -268,6 +268,12 @@
       </div>
       <div class="brute-option-row">
         <label class="gpu-toggle-label">
+          <input type="checkbox" id="auto-tune-toggle" checked>
+          <span>Dynamically find optimal batch size (disable if you get errors or instability)</span>
+        </label>
+      </div>
+      <div class="brute-option-row">
+        <label class="gpu-toggle-label">
           <input type="checkbox" id="timestamp-filter" checked>
           <span>Ignore keys that result in a decrypted timestamp of >1 month ago</span>
         </label>

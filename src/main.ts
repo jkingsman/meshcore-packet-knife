@@ -31,8 +31,95 @@ let savedCipherMac = '';
 let gpuInstance: GpuBruteForce | null = null;
 let gpuAvailable = false;
 let useGpu = true; // User preference
+let useAutoTune = true; // Dynamically find optimal batch size
 let useTimestampFilter = true; // Filter by timestamp (last month)
 let useUnicodeFilter = true; // Filter invalid unicode characters
+
+// Fixed batch size when auto-tune is disabled
+const FIXED_BATCH_SIZE = 262144; // 256K - conservative default
+const UPDATE_INTERVAL = 100; // ms - 10 updates per second
+
+// Formatting helpers
+function formatTime(seconds: number): string {
+  if (seconds < 60) {
+    return `${Math.round(seconds)}s`;
+  }
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}:${m.toString().padStart(2, '0')}:${Math.round(seconds % 60)
+    .toString()
+    .padStart(2, '0')}`;
+}
+
+function formatRate(rate: number): string {
+  if (rate >= 1000000) {
+    return `${(rate / 1000000).toFixed(2)} Mkeys/s`;
+  }
+  if (rate >= 1000) {
+    return `${(rate / 1000).toFixed(1)} kkeys/s`;
+  }
+  return `${rate} keys/s`;
+}
+
+function getBatchInfo(currentBatchSize: number, batchSizeTuned: boolean): string {
+  if (!useAutoTune) {
+    return ` | Batch: ${(FIXED_BATCH_SIZE / 1024).toFixed(0)}K (fixed)`;
+  }
+  return batchSizeTuned ? ` | Batch: ${(currentBatchSize / 1024).toFixed(0)}K` : ' | Tuning...';
+}
+
+// Brute force UI state helpers
+function getBruteForceElements() {
+  return {
+    statusEl: document.getElementById('brute-status')!,
+    bruteBtn: document.getElementById('brute-btn') as HTMLButtonElement,
+    skipBtn: document.getElementById('brute-skip-btn') as HTMLButtonElement,
+  };
+}
+
+function startBruteForceUI() {
+  const { bruteBtn, skipBtn } = getBruteForceElements();
+  bruteForceRunning = true;
+  bruteForceAbort = false;
+  bruteBtn.disabled = false;
+  bruteBtn.textContent = 'Stop';
+  bruteBtn.classList.add('running');
+  skipBtn.style.display = 'none';
+}
+
+function finishBruteForceUI(showSkip: boolean) {
+  const { bruteBtn, skipBtn } = getBruteForceElements();
+  bruteForceRunning = false;
+  bruteBtn.textContent = 'Start';
+  bruteBtn.classList.remove('running');
+  skipBtn.style.display = showSkip ? 'inline-block' : 'none';
+}
+
+// Check if public key matches (returns result or null to continue)
+function checkPublicKey(
+  targetChannelHash: string,
+  ciphertext: string,
+  cipherMac: string,
+  gpuMode: boolean,
+): { found: true; roomName: string; key: string } | null {
+  const { statusEl } = getBruteForceElements();
+  const publicChannelHash = getChannelHash(PUBLIC_KEY);
+  if (publicChannelHash === targetChannelHash) {
+    if (verifyMac(ciphertext, cipherMac, PUBLIC_KEY)) {
+      const modeInfo = gpuMode ? '<div class="stat">Mode: GPU accelerated</div>' : '';
+      statusEl.innerHTML = `<div class="stat found">Found: ${PUBLIC_ROOM_NAME}</div>${modeInfo}`;
+      finishBruteForceUI(true);
+      saveResumePosition('a');
+      return { found: true, roomName: PUBLIC_ROOM_NAME, key: PUBLIC_KEY };
+    }
+  }
+  return null;
+}
 
 // Wrapper functions that respect filter toggle state
 function isTimestampValid(timestamp: number): boolean {
@@ -96,9 +183,7 @@ async function bruteForce(
   startFrom?: string,
 ): Promise<{ found: boolean; roomName?: string; key?: string }> {
   const gen = new RoomNameGenerator();
-  const statusEl = document.getElementById('brute-status')!;
-  const bruteBtn = document.getElementById('brute-btn') as HTMLButtonElement;
-  const skipBtn = document.getElementById('brute-skip-btn') as HTMLButtonElement;
+  const { statusEl } = getBruteForceElements();
 
   // If starting from a specific position, advance generator
   if (startFrom) {
@@ -109,44 +194,28 @@ async function bruteForce(
   }
 
   let count = 0;
-  let hashMatches = 0;
   const startTime = performance.now();
   let lastUpdate = performance.now();
-  const BATCH_SIZE = 10000; // Larger batches since we update less frequently
-  const UPDATE_INTERVAL = 100; // ms - 10 updates per second
+  const BATCH_SIZE = 10000;
 
   // Save for potential resume
   savedTargetChannelHash = targetChannelHash;
   savedCiphertext = ciphertext;
   savedCipherMac = cipherMac;
 
-  bruteForceRunning = true;
-  bruteForceAbort = false;
-  bruteBtn.disabled = false;
-  bruteBtn.textContent = 'Stop';
-  bruteBtn.classList.add('running');
-  skipBtn.style.display = 'none';
+  startBruteForceUI();
 
   // Check public key first (only on fresh start)
   if (!startFrom) {
-    const publicChannelHash = getChannelHash(PUBLIC_KEY);
-    if (publicChannelHash === targetChannelHash) {
-      if (verifyMac(ciphertext, cipherMac, PUBLIC_KEY)) {
-        statusEl.innerHTML = `<div class="stat found">Found: ${PUBLIC_ROOM_NAME}</div>`;
-        bruteForceRunning = false;
-        bruteBtn.textContent = 'Start';
-        bruteBtn.classList.remove('running');
-        skipBtn.style.display = 'inline-block';
-        saveResumePosition('a'); // Next position after public key check
-        return Promise.resolve({ found: true, roomName: PUBLIC_ROOM_NAME, key: PUBLIC_KEY });
-      }
+    const publicResult = checkPublicKey(targetChannelHash, ciphertext, cipherMac, false);
+    if (publicResult) {
+      return publicResult;
     }
   }
 
   return new Promise((resolve) => {
     function processBatch() {
       if (bruteForceAbort) {
-        // Save current position for resume
         saveResumePosition(gen.current());
         finish(false);
         return;
@@ -160,20 +229,17 @@ async function bruteForce(
         count++;
 
         if (channelHash === targetChannelHash) {
-          hashMatches++;
-          // Potential match - verify MAC and optionally timestamp
           if (verifyMacAndTimestamp(ciphertext, cipherMac, key)) {
-            updateStatus(roomName, count, hashMatches, startTime, gen, true);
-            // Save next position for skip/resume
+            updateStatus(roomName, true);
             gen.nextValid();
             saveResumePosition(gen.current());
-            finishFound(roomName, key);
+            finishBruteForceUI(true);
+            resolve({ found: true, roomName, key });
             return;
           }
         }
 
         if (!gen.nextValid()) {
-          // Exhausted all possibilities (shouldn't happen in practice)
           finish(false);
           return;
         }
@@ -181,82 +247,39 @@ async function bruteForce(
 
       const now = performance.now();
       if (now - lastUpdate >= UPDATE_INTERVAL) {
-        updateStatus(gen.current(), count, hashMatches, startTime, gen, false);
+        updateStatus(gen.current(), false);
         lastUpdate = now;
       }
 
-      // Yield to UI
       setTimeout(processBatch, 0);
     }
 
-    function formatTime(seconds: number): string {
-      if (seconds < 60) {
-        return `${Math.round(seconds)}s`;
-      }
-      if (seconds < 3600) {
-        const m = Math.floor(seconds / 60);
-        const s = Math.round(seconds % 60);
-        return `${m}:${s.toString().padStart(2, '0')}`;
-      }
-      const h = Math.floor(seconds / 3600);
-      const m = Math.floor((seconds % 3600) / 60);
-      return `${h}:${m.toString().padStart(2, '0')}:${Math.round(seconds % 60)
-        .toString()
-        .padStart(2, '0')}`;
-    }
-
-    function formatRate(rate: number): string {
-      if (rate >= 1000) {
-        return `${(rate / 1000).toFixed(1)} kkeys/s`;
-      }
-      return `${rate} keys/s`;
-    }
-
-    function updateStatus(
-      current: string,
-      total: number,
-      _matches: number,
-      start: number,
-      g: RoomNameGenerator,
-      found: boolean,
-    ) {
-      const elapsed = (performance.now() - start) / 1000;
-      const rate = Math.round(total / elapsed);
-      const remaining = g.getRemainingInLength();
+    function updateStatus(current: string, found: boolean) {
+      const elapsed = (performance.now() - startTime) / 1000;
+      const rate = Math.round(count / elapsed);
+      const remaining = gen.getRemainingInLength();
       const etaSeconds = rate > 0 ? remaining / rate : 0;
       const pct =
-        g.getTotalForLength() > 0
-          ? (((g.getTotalForLength() - remaining) / g.getTotalForLength()) * 100).toFixed(1)
+        gen.getTotalForLength() > 0
+          ? (((gen.getTotalForLength() - remaining) / gen.getTotalForLength()) * 100).toFixed(1)
           : '0';
 
       if (found) {
         statusEl.innerHTML =
           `<div class="stat found">Found: #${escapeHtml(current)}</div>` +
-          `<div class="stat">Checked: ${total.toLocaleString()} keys in ${formatTime(elapsed)}</div>` +
+          `<div class="stat">Checked: ${count.toLocaleString()} keys in ${formatTime(elapsed)}</div>` +
           `<div class="stat">Rate: ${formatRate(rate)}</div>`;
       } else {
         statusEl.innerHTML =
           `<div class="stat">Current: #${escapeHtml(current)}</div>` +
-          `<div class="stat">Elapsed: ${formatTime(elapsed)} | Checked: ${total.toLocaleString()} keys (${formatRate(rate)})</div>` +
-          `<div class="stat">Length ${g.getLength()}: ${pct}% complete, ~${formatTime(etaSeconds)} remaining</div>`;
+          `<div class="stat">Elapsed: ${formatTime(elapsed)} | Checked: ${count.toLocaleString()} keys (${formatRate(rate)})</div>` +
+          `<div class="stat">Length ${gen.getLength()}: ${pct}% complete, ~${formatTime(etaSeconds)} remaining</div>`;
       }
     }
 
-    function finishFound(roomName: string, key: string) {
-      bruteForceRunning = false;
-      bruteBtn.textContent = 'Start';
-      bruteBtn.classList.remove('running');
-      skipBtn.style.display = 'inline-block';
-      resolve({ found: true, roomName, key });
-    }
-
     function finish(found: boolean, roomName?: string, key?: string) {
-      bruteForceRunning = false;
-      bruteBtn.textContent = 'Start';
-      bruteBtn.classList.remove('running');
-      // Show skip button if we stopped mid-search (resume field has a value)
       const resumeInput = getResumeInput();
-      skipBtn.style.display = resumeInput?.value ? 'inline-block' : 'none';
+      finishBruteForceUI(!!resumeInput?.value);
       resolve({ found, roomName, key });
     }
 
@@ -275,21 +298,14 @@ async function bruteForceGpu(
     throw new Error('GPU not available');
   }
 
-  const statusEl = document.getElementById('brute-status')!;
-  const bruteBtn = document.getElementById('brute-btn') as HTMLButtonElement;
-  const skipBtn = document.getElementById('brute-skip-btn') as HTMLButtonElement;
-
-  bruteForceRunning = true;
-  bruteForceAbort = false;
-  bruteBtn.disabled = false;
-  bruteBtn.textContent = 'Stop';
-  bruteBtn.classList.add('running');
-  skipBtn.style.display = 'none';
+  const { statusEl } = getBruteForceElements();
 
   // Save for potential resume
   savedTargetChannelHash = targetChannelHash;
   savedCiphertext = ciphertext;
   savedCipherMac = cipherMac;
+
+  startBruteForceUI();
 
   const startTime = performance.now();
   let totalChecked = 0;
@@ -308,49 +324,19 @@ async function bruteForceGpu(
 
   // Check public key first (only if starting from beginning)
   if (!startFrom) {
-    const publicChannelHash = getChannelHash(PUBLIC_KEY);
-    if (publicChannelHash === targetChannelHash) {
-      if (verifyMac(ciphertext, cipherMac, PUBLIC_KEY)) {
-        statusEl.innerHTML =
-          `<div class="stat found">Found: ${PUBLIC_ROOM_NAME}</div>` +
-          '<div class="stat">Mode: GPU accelerated</div>';
-        bruteForceRunning = false;
-        bruteBtn.textContent = 'Start';
-        bruteBtn.classList.remove('running');
-        skipBtn.style.display = 'inline-block';
-        saveResumePosition('a');
-        return { found: true, roomName: PUBLIC_ROOM_NAME, key: PUBLIC_KEY };
-      }
+    const publicResult = checkPublicKey(targetChannelHash, ciphertext, cipherMac, true);
+    if (publicResult) {
+      return publicResult;
     }
   }
 
-  function formatTime(seconds: number): string {
-    if (seconds < 60) {
-      return `${Math.round(seconds)}s`;
-    }
-    if (seconds < 3600) {
-      const m = Math.floor(seconds / 60);
-      const s = Math.round(seconds % 60);
-      return `${m}:${s.toString().padStart(2, '0')}`;
-    }
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    return `${h}:${m.toString().padStart(2, '0')}:${Math.round(seconds % 60)
-      .toString()
-      .padStart(2, '0')}`;
-  }
+  // Auto-tuning parameters
+  const INITIAL_BATCH_SIZE = 32768; // Start small (32K)
+  const TARGET_DISPATCH_MS = 1000; // Target ~1s per dispatch
+  const MIN_BATCH_SIZE = 32768; // Don't go below 32K
+  let currentBatchSize = useAutoTune ? INITIAL_BATCH_SIZE : FIXED_BATCH_SIZE;
+  let batchSizeTuned = !useAutoTune; // Skip tuning if disabled
 
-  function formatRate(rate: number): string {
-    if (rate >= 1000000) {
-      return `${(rate / 1000000).toFixed(2)} Mkeys/s`;
-    }
-    if (rate >= 1000) {
-      return `${(rate / 1000).toFixed(1)} kkeys/s`;
-    }
-    return `${rate} keys/s`;
-  }
-
-  const GPU_BATCH_SIZE = 262144; // 256k items per GPU dispatch
   const UPDATE_INTERVAL = 100; // ms - 10 updates per second
   let lastUpdate = performance.now();
   let currentLength = startLength;
@@ -364,7 +350,10 @@ async function bruteForceGpu(
     while (offset < totalForLength && !bruteForceAbort) {
       currentLength = length;
       currentOffset = offset;
-      const batchSize = Math.min(GPU_BATCH_SIZE, totalForLength - offset);
+      const batchSize = Math.min(currentBatchSize, totalForLength - offset);
+
+      // Time the GPU dispatch for auto-tuning
+      const dispatchStart = performance.now();
 
       // Run GPU batch with MAC verification
       const matches = await gpuInstance.runBatch(
@@ -376,7 +365,27 @@ async function bruteForceGpu(
         cipherMac,
       );
 
+      const dispatchTime = performance.now() - dispatchStart;
       totalChecked += batchSize;
+
+      // Auto-tune batch size after first full-sized dispatch
+      // Only tune if we actually ran a full batch (not a partial at end of length)
+      if (!batchSizeTuned && batchSize >= INITIAL_BATCH_SIZE && dispatchTime > 0) {
+        // Calculate optimal batch size to hit target time
+        const scaleFactor = TARGET_DISPATCH_MS / dispatchTime;
+        const optimalBatchSize = Math.round(batchSize * scaleFactor);
+        // Round to nearest power of 2, with minimum
+        const rounded = Math.pow(
+          2,
+          Math.round(Math.log2(Math.max(MIN_BATCH_SIZE, optimalBatchSize))),
+        );
+        currentBatchSize = Math.max(MIN_BATCH_SIZE, rounded);
+        batchSizeTuned = true;
+        console.log(
+          `GPU auto-tune: ${batchSize.toLocaleString()} keys in ${dispatchTime.toFixed(1)}ms ` +
+            `(scale=${scaleFactor.toFixed(1)}x) → batch size ${currentBatchSize.toLocaleString()}`,
+        );
+      }
 
       // Verify MAC for each match (on CPU)
       for (const matchIdx of matches) {
@@ -391,18 +400,15 @@ async function bruteForceGpu(
           const rate = Math.round(totalChecked / elapsed);
           statusEl.innerHTML =
             `<div class="stat found">Found: #${escapeHtml(roomName)}</div>` +
-            '<div class="stat">Mode: GPU accelerated</div>' +
+            `<div class="stat">Mode: GPU accelerated${getBatchInfo(currentBatchSize, batchSizeTuned)}</div>` +
             `<div class="stat">Checked: ${totalChecked.toLocaleString()} keys in ${formatTime(elapsed)}</div>` +
             `<div class="stat">Rate: ${formatRate(rate)}</div>`;
 
-          bruteForceRunning = false;
-          bruteBtn.textContent = 'Start';
-          bruteBtn.classList.remove('running');
-          skipBtn.style.display = 'inline-block';
           // Save next position after the found match for resume
           const nextName =
             indexToRoomName(length, matchIdx + 1) || indexToRoomName(length + 1, 0) || '';
           saveResumePosition(nextName);
+          finishBruteForceUI(true);
           return { found: true, roomName, key };
         }
       }
@@ -418,8 +424,9 @@ async function bruteForceGpu(
         const etaSeconds = rate > 0 ? remaining / rate : 0;
         const pct = ((offset / totalForLength) * 100).toFixed(1);
 
+        const batchInfo = getBatchInfo(currentBatchSize, batchSizeTuned);
         statusEl.innerHTML =
-          '<div class="stat">Mode: GPU accelerated</div>' +
+          `<div class="stat">Mode: GPU accelerated${batchInfo}</div>` +
           `<div class="stat">Elapsed: ${formatTime(elapsed)} | Checked: ${totalChecked.toLocaleString()} keys (${formatRate(rate)})</div>` +
           `<div class="stat">Length ${length}: ${pct}% complete, ~${formatTime(etaSeconds)} remaining</div>`;
 
@@ -437,12 +444,8 @@ async function bruteForceGpu(
     saveResumePosition(currentName);
   }
 
-  bruteForceRunning = false;
-  bruteBtn.textContent = 'Start';
-  bruteBtn.classList.remove('running');
-  // Show skip if we stopped mid-search
   const resumeInput = getResumeInput();
-  skipBtn.style.display = resumeInput?.value ? 'inline-block' : 'none';
+  finishBruteForceUI(!!resumeInput?.value);
   return { found: false };
 }
 
@@ -719,6 +722,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     gpuToggle.disabled = !gpuAvailable;
     gpuToggle.addEventListener('change', () => {
       useGpu = gpuToggle.checked;
+    });
+  }
+
+  // Auto-tune toggle handler
+  const autoTuneToggle = document.getElementById('auto-tune-toggle') as HTMLInputElement | null;
+  if (autoTuneToggle) {
+    autoTuneToggle.checked = useAutoTune;
+    autoTuneToggle.addEventListener('change', () => {
+      useAutoTune = autoTuneToggle.checked;
     });
   }
 
