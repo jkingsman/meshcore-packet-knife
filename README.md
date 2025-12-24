@@ -40,7 +40,7 @@ npm run test:watch
 
 ## **How does this work?**
 
-The packet visualization is just a wrapper around [meshcore-decoder](https://github.com/michaelhart/meshcore-decoder).
+The packet visualization is just a wrapper around [meshcore-decoder](https://github.com/michaelhart/meshcore-decoder). Cracking is probably the part you're interested in, though:
 
 Hashtag rooms (at least in the app I use for Android) have restrictions: alphanum, lowercase, with hyphens, and no leading/trailing/double hypens, with max length of 30. The key for hashtag rooms is the first 16 bytes of the SHA256 of `"#" + roomName`. That's a darn small keyspace, and we have the `channelHash`, which gives us the SHA256 of the valid key; the `cipherMac` gives us further confirmation of a correct key.
 
