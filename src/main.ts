@@ -624,6 +624,7 @@ async function analyze(): Promise<void> {
   if (!packetHex) {
     outputEl.style.display = 'none';
     bruteBtn.disabled = true;
+    bruteBtn.textContent = 'Start';
     lastPacket = null;
     autoDetectedPublic = false;
     return;
@@ -668,6 +669,7 @@ async function analyze(): Promise<void> {
       const isGroupText = Utils.getPayloadTypeName(packet.payloadType) === 'GroupText';
       const isDecrypted = packet.payload?.decoded?.decrypted;
       bruteBtn.disabled = !isGroupText || !!isDecrypted;
+      bruteBtn.textContent = isDecrypted ? 'Key already known!' : 'Start';
     }
 
     outputEl.innerHTML = formatOutput(packet, structure, channelKey);
@@ -675,6 +677,7 @@ async function analyze(): Promise<void> {
     outputEl.innerHTML = `<span class="error">Error: ${escapeHtml((e as Error).message)}</span>`;
     if (!bruteForceRunning) {
       bruteBtn.disabled = true;
+      bruteBtn.textContent = 'Start';
     }
     lastPacket = null;
   }
