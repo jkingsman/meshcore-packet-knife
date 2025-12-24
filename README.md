@@ -2,6 +2,8 @@
 
 A web-based tool for decoding MeshCore mesh networking packets, with GPU-accelerated brute force key cracking for hashtag rooms.
 
+## Use it here: https://jkingsman.github.io/meshcore-packet-knife/
+
 ### Important note: Nothing is broken or insecure in the parts of MeshCore that are meant to be secure. DMs are private. Private channels are private. Hashtag rooms (especially those with short names) are not, and have never been, private. MeshCore is secure; nothing has changed.
 
 ## Credit
