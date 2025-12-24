@@ -8,8 +8,8 @@
   "scripts": {
     "format": "prettier --write src/",
     "lint": "eslint --fix src/",
-    "build": "npm run format && npm run lint && esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --platform=browser --target=es2020 && cp index.html dist/ && rm -rf docs && cp -r dist docs && echo 'blame github pages' > docs/what.md",
-    "watch": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --platform=browser --target=es2020 --watch",
+    "build": "npm run format && npm run lint && esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --platform=browser --target=es2020 --sourcemap && cp index.html dist/ && rm -rf docs && cp -r dist docs && echo 'blame github pages' > docs/what.md",
+    "watch": "esbuild src/main.ts --bundle --outfile=dist/bundle.js --format=iife --platform=browser --target=es2020 --sourcemap --watch",
     "serve": "npx serve dist",
     "test": "vitest run",
     "test:watch": "vitest"
