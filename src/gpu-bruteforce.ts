@@ -349,15 +349,8 @@ fn sha256_block_continue(msg: ptr<function, array<u32, 16>>, h_in: array<u32, 8>
   return h;
 }
 
-@compute @workgroup_size(256)
-fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-  let idx = global_id.x;
-  if (idx >= params.batch_size) {
-    return;
-  }
-
-  let name_idx = params.batch_offset + idx;
-
+// Process a single candidate and record match if found
+fn process_candidate(name_idx: u32) {
   // Generate message for this room name
   var msg: array<u32, 16>;
   let valid = index_to_room_name(name_idx, params.name_length, &msg);
@@ -396,6 +389,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let match_idx = atomicAdd(&match_count, 1u);
   if (match_idx < 1024u) { // Limit stored matches
     match_indices[match_idx] = name_idx;
+  }
+}
+
+// Each thread processes 4 candidates to amortize thread overhead
+const CANDIDATES_PER_THREAD: u32 = 4u;
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+  let base_idx = global_id.x * CANDIDATES_PER_THREAD;
+
+  for (var i = 0u; i < CANDIDATES_PER_THREAD; i++) {
+    let idx = base_idx + i;
+    if (idx >= params.batch_size) {
+      return;
+    }
+    let name_idx = params.batch_offset + idx;
+    process_candidate(name_idx);
   }
 }
 `;
@@ -585,7 +595,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     const passEncoder = commandEncoder.beginComputePass();
     passEncoder.setPipeline(this.pipeline);
     passEncoder.setBindGroup(0, bindGroup);
-    passEncoder.dispatchWorkgroups(Math.ceil(batchSize / 256));
+    // Each workgroup has 256 threads, each processing 4 candidates
+    const CANDIDATES_PER_THREAD = 4;
+    passEncoder.dispatchWorkgroups(Math.ceil(batchSize / (256 * CANDIDATES_PER_THREAD)));
     passEncoder.end();
 
     // Copy results to staging buffers

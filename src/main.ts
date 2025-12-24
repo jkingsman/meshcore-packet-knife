@@ -350,7 +350,7 @@ async function bruteForceGpu(
     return `${rate} keys/s`;
   }
 
-  const GPU_BATCH_SIZE = 65536; // 64k items per GPU dispatch
+  const GPU_BATCH_SIZE = 262144; // 256k items per GPU dispatch
   const UPDATE_INTERVAL = 100; // ms - 10 updates per second
   let lastUpdate = performance.now();
   let currentLength = startLength;
