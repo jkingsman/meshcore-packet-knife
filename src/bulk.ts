@@ -1,0 +1,561 @@
+import { MeshCorePacketDecoder, ChannelCrypto } from '@michaelhart/meshcore-decoder';
+import { getGpuBruteForce, isWebGpuSupported, GpuBruteForce } from './gpu-bruteforce';
+import {
+  PUBLIC_ROOM_NAME,
+  PUBLIC_KEY,
+  indexToRoomName,
+  roomNameToIndex,
+  deriveKeyFromRoomName,
+  getChannelHash,
+  verifyMac,
+  escapeHtml,
+  countNamesForLength,
+  isTimestampValid as coreIsTimestampValid,
+  isValidUtf8 as coreIsValidUtf8,
+} from './core';
+
+// Types
+interface QueueItem {
+  id: number;
+  packetHex: string;
+  status: 'pending' | 'processing' | 'cracked' | 'failed';
+  channelHash?: string;
+  ciphertext?: string;
+  cipherMac?: string;
+  roomName?: string;
+  key?: string;
+  sender?: string;
+  message?: string;
+  testedUpTo?: string;
+  testedUpToLength?: number;
+  maxLength: number;
+  startFromLength: number;
+  error?: string;
+}
+
+// State
+const queue: QueueItem[] = [];
+const knownKeys: Map<string, { roomName: string; key: string }> = new Map();
+let nextId = 1;
+let isProcessing = false;
+let gpuInstance: GpuBruteForce | null = null;
+let crackedCount = 0;
+let failedCount = 0;
+let currentRate = 0;
+
+// Filter settings
+let useTimestampFilter = true;
+let useUnicodeFilter = true;
+
+// DOM elements
+let resultsBody: HTMLTableSectionElement;
+let queueCountEl: HTMLElement;
+let currentStatusEl: HTMLElement;
+let crackedCountEl: HTMLElement;
+let failedCountEl: HTMLElement;
+let currentRateEl: HTMLElement;
+let knownKeysEl: HTMLElement;
+let knownKeysListEl: HTMLElement;
+let maxLengthInput: HTMLInputElement;
+
+// Filter wrappers
+function isTimestampValid(timestamp: number): boolean {
+  return !useTimestampFilter || coreIsTimestampValid(timestamp);
+}
+
+function isValidUtf8(text: string): boolean {
+  return !useUnicodeFilter || coreIsValidUtf8(text);
+}
+
+// Verify MAC and check filters
+function verifyMacAndFilters(
+  ciphertext: string,
+  cipherMac: string,
+  keyHex: string,
+): { valid: boolean; sender?: string; message?: string } {
+  if (!verifyMac(ciphertext, cipherMac, keyHex)) {
+    return { valid: false };
+  }
+
+  const result = ChannelCrypto.decryptGroupTextMessage(ciphertext, cipherMac, keyHex);
+  if (!result.success || !result.data) {
+    return { valid: false };
+  }
+
+  if (!isTimestampValid(result.data.timestamp)) {
+    return { valid: false };
+  }
+
+  if (!isValidUtf8(result.data.message)) {
+    return { valid: false };
+  }
+
+  return { valid: true, sender: result.data.sender, message: result.data.message };
+}
+
+// Formatting helpers
+function formatRate(rate: number): string {
+  if (rate >= 1000000000) {
+    return `${(rate / 1000000000).toFixed(2)} Gkeys/s`;
+  }
+  if (rate >= 1000000) {
+    return `${(rate / 1000000).toFixed(2)} Mkeys/s`;
+  }
+  if (rate >= 1000) {
+    return `${(rate / 1000).toFixed(1)} kkeys/s`;
+  }
+  return `${rate} keys/s`;
+}
+
+// Update known keys display
+function updateKnownKeysDisplay(): void {
+  if (knownKeys.size === 0) {
+    knownKeysEl.style.display = 'none';
+    return;
+  }
+  knownKeysEl.style.display = 'block';
+  knownKeysListEl.innerHTML = Array.from(knownKeys.values())
+    .map(
+      (k) =>
+        `<div class="known-key-item">#${escapeHtml(k.roomName)} → ${k.key.substring(0, 16)}...</div>`,
+    )
+    .join('');
+}
+
+// Update status bar
+function updateStatusBar(): void {
+  queueCountEl.textContent = String(queue.filter((q) => q.status === 'pending').length);
+  crackedCountEl.textContent = String(crackedCount);
+  failedCountEl.textContent = String(failedCount);
+  currentRateEl.textContent = currentRate > 0 ? formatRate(currentRate) : '-';
+}
+
+// Render a single row
+function renderRow(item: QueueItem): string {
+  let statusClass = '';
+  let statusText = '';
+  let resultText = '';
+  let actionsHtml = '';
+
+  switch (item.status) {
+    case 'pending':
+      statusClass = 'status-pending';
+      statusText = `Pending (max ${item.maxLength})`;
+      resultText = '-';
+      break;
+    case 'processing':
+      statusClass = 'status-processing';
+      statusText = 'Processing...';
+      resultText = item.testedUpTo ? `Testing #${escapeHtml(item.testedUpTo)}...` : 'Starting...';
+      break;
+    case 'cracked':
+      statusClass = 'status-cracked';
+      statusText = 'Cracked';
+      resultText = item.sender
+        ? `<strong>${escapeHtml(item.sender)}:</strong> ${escapeHtml(item.message || '')}`
+        : escapeHtml(item.message || '');
+      break;
+    case 'failed':
+      statusClass = 'status-failed';
+      statusText = 'Not found';
+      resultText = `No key found up to #${escapeHtml(item.testedUpTo || '?')}`;
+      actionsHtml = `
+        <button class="action-btn retry-btn" data-id="${item.id}" title="Retry with higher max length">Retry +1</button>
+        <button class="action-btn skip-btn" data-id="${item.id}" title="Skip this result (MAC collision) and continue searching">Skip</button>
+      `;
+      break;
+  }
+
+  const packetPreview = item.packetHex.substring(0, 32) + (item.packetHex.length > 32 ? '...' : '');
+
+  return `
+    <tr data-id="${item.id}">
+      <td>${item.id}</td>
+      <td class="${statusClass}">${statusText}</td>
+      <td class="mono packet-preview" title="${escapeHtml(item.packetHex)}">${escapeHtml(packetPreview)}</td>
+      <td class="mono">${item.roomName ? '#' + escapeHtml(item.roomName) : '-'}</td>
+      <td class="message-cell">${resultText}${actionsHtml ? '<div class="action-btns">' + actionsHtml + '</div>' : ''}</td>
+    </tr>
+  `;
+}
+
+// Update a single row in the table
+function updateRow(item: QueueItem): void {
+  const existingRow = resultsBody.querySelector(`tr[data-id="${item.id}"]`);
+  if (existingRow) {
+    existingRow.outerHTML = renderRow(item);
+    bindRowActions(item);
+  }
+}
+
+// Bind action button handlers for a row
+function bindRowActions(item: QueueItem): void {
+  const row = resultsBody.querySelector(`tr[data-id="${item.id}"]`);
+  if (!row) {
+    return;
+  }
+
+  const retryBtn = row.querySelector('.retry-btn');
+  const skipBtn = row.querySelector('.skip-btn');
+
+  if (retryBtn) {
+    retryBtn.addEventListener('click', () => retryWithHigherLimit(item.id));
+  }
+  if (skipBtn) {
+    skipBtn.addEventListener('click', () => skipAndContinue(item.id));
+  }
+}
+
+// Add item to results table
+function addRowToTable(item: QueueItem): void {
+  const emptyRow = resultsBody.querySelector('.empty-state-row');
+  if (emptyRow) {
+    emptyRow.remove();
+  }
+  resultsBody.insertAdjacentHTML('beforeend', renderRow(item));
+  bindRowActions(item);
+}
+
+// Retry a failed item with a higher limit
+function retryWithHigherLimit(id: number): void {
+  const item = queue.find((q) => q.id === id);
+  if (!item || item.status !== 'failed') {
+    return;
+  }
+
+  // Increase max length by 1
+  item.maxLength = (item.testedUpToLength || item.maxLength) + 1;
+  item.startFromLength = (item.testedUpToLength || 1) + 1;
+  item.status = 'pending';
+  item.testedUpTo = undefined;
+  failedCount--;
+
+  updateRow(item);
+  updateStatusBar();
+  processQueue();
+}
+
+// Skip MAC collision and continue searching
+function skipAndContinue(id: number): void {
+  const item = queue.find((q) => q.id === id);
+  if (!item || item.status !== 'failed') {
+    return;
+  }
+
+  // Continue from where we left off
+  if (item.testedUpTo) {
+    const pos = roomNameToIndex(item.testedUpTo);
+    if (pos) {
+      item.startFromLength = pos.length;
+    }
+  }
+  item.status = 'pending';
+  failedCount--;
+
+  updateRow(item);
+  updateStatusBar();
+  processQueue();
+}
+
+// Try known keys on a packet
+function tryKnownKeys(item: QueueItem): boolean {
+  if (!item.channelHash || !item.ciphertext || !item.cipherMac) {
+    return false;
+  }
+
+  // Check if we have a known key for this channel hash
+  const known = knownKeys.get(item.channelHash);
+  if (known) {
+    const result = verifyMacAndFilters(item.ciphertext, item.cipherMac, known.key);
+    if (result.valid) {
+      item.status = 'cracked';
+      item.roomName = known.roomName;
+      item.key = known.key;
+      item.sender = result.sender;
+      item.message = result.message;
+      crackedCount++;
+      return true;
+    }
+  }
+
+  // Also try public key
+  const publicChannelHash = getChannelHash(PUBLIC_KEY);
+  if (item.channelHash === publicChannelHash) {
+    const result = verifyMacAndFilters(item.ciphertext, item.cipherMac, PUBLIC_KEY);
+    if (result.valid) {
+      item.status = 'cracked';
+      item.roomName = PUBLIC_ROOM_NAME;
+      item.key = PUBLIC_KEY;
+      item.sender = result.sender;
+      item.message = result.message;
+      crackedCount++;
+      knownKeys.set(item.channelHash, { roomName: PUBLIC_ROOM_NAME, key: PUBLIC_KEY });
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// Process a single queue item with brute force
+async function processItem(item: QueueItem): Promise<void> {
+  if (!gpuInstance) {
+    item.status = 'failed';
+    item.error = 'GPU not available';
+    item.testedUpTo = 'N/A';
+    failedCount++;
+    return;
+  }
+
+  const targetHashByte = parseInt(item.channelHash!, 16);
+  const startTime = performance.now();
+  let totalChecked = 0;
+  let lastRateUpdate = performance.now();
+
+  // Auto-tuning
+  const INITIAL_BATCH_SIZE = 32768;
+  const TARGET_DISPATCH_MS = 1000;
+  let currentBatchSize = INITIAL_BATCH_SIZE;
+  let batchSizeTuned = false;
+
+  for (let length = item.startFromLength; length <= item.maxLength; length++) {
+    const totalForLength = countNamesForLength(length);
+    let offset = 0;
+
+    while (offset < totalForLength) {
+      const batchSize = Math.min(currentBatchSize, totalForLength - offset);
+      const dispatchStart = performance.now();
+
+      const matches = await gpuInstance.runBatch(
+        targetHashByte,
+        length,
+        offset,
+        batchSize,
+        item.ciphertext!,
+        item.cipherMac!,
+      );
+
+      const dispatchTime = performance.now() - dispatchStart;
+      totalChecked += batchSize;
+
+      // Auto-tune
+      if (!batchSizeTuned && batchSize >= INITIAL_BATCH_SIZE && dispatchTime > 0) {
+        const scaleFactor = TARGET_DISPATCH_MS / dispatchTime;
+        const optimalBatchSize = Math.round(batchSize * scaleFactor);
+        const rounded = Math.pow(
+          2,
+          Math.round(Math.log2(Math.max(INITIAL_BATCH_SIZE, optimalBatchSize))),
+        );
+        currentBatchSize = Math.max(INITIAL_BATCH_SIZE, rounded);
+        batchSizeTuned = true;
+      }
+
+      // Check matches
+      for (const matchIdx of matches) {
+        const roomName = indexToRoomName(length, matchIdx);
+        if (!roomName) {
+          continue;
+        }
+
+        const key = deriveKeyFromRoomName('#' + roomName);
+        const result = verifyMacAndFilters(item.ciphertext!, item.cipherMac!, key);
+        if (result.valid) {
+          item.status = 'cracked';
+          item.roomName = roomName;
+          item.key = key;
+          item.sender = result.sender;
+          item.message = result.message;
+          item.testedUpToLength = length;
+          crackedCount++;
+
+          knownKeys.set(item.channelHash!, { roomName, key });
+          updateKnownKeysDisplay();
+
+          return;
+        }
+      }
+
+      offset += batchSize;
+
+      // Update rate periodically
+      const now = performance.now();
+      if (now - lastRateUpdate >= 200) {
+        const elapsed = (now - startTime) / 1000;
+        currentRate = Math.round(totalChecked / elapsed);
+        item.testedUpTo =
+          indexToRoomName(length, Math.min(offset, totalForLength - 1)) || item.testedUpTo;
+        item.testedUpToLength = length;
+        updateRow(item);
+        updateStatusBar();
+        lastRateUpdate = now;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+  }
+
+  // Not found
+  item.status = 'failed';
+  item.testedUpTo =
+    indexToRoomName(item.maxLength, countNamesForLength(item.maxLength) - 1) ||
+    `length ${item.maxLength}`;
+  item.testedUpToLength = item.maxLength;
+  failedCount++;
+}
+
+// Main processing loop
+async function processQueue(): Promise<void> {
+  if (isProcessing) {
+    return;
+  }
+  isProcessing = true;
+
+  while (true) {
+    const item = queue.find((q) => q.status === 'pending');
+    if (!item) {
+      break;
+    }
+
+    item.status = 'processing';
+    currentStatusEl.textContent = `#${item.id}`;
+    updateRow(item);
+    updateStatusBar();
+
+    // First try known keys
+    if (tryKnownKeys(item)) {
+      updateRow(item);
+      updateStatusBar();
+      updateKnownKeysDisplay();
+      continue;
+    }
+
+    // Brute force
+    await processItem(item);
+    updateRow(item);
+    updateStatusBar();
+  }
+
+  currentStatusEl.textContent = 'Idle';
+  currentRate = 0;
+  updateStatusBar();
+  isProcessing = false;
+}
+
+// Add packet to queue
+async function addPacket(packetHex: string, maxLength: number): Promise<void> {
+  const cleanHex = packetHex.trim().replace(/\s+/g, '').replace(/^0x/i, '');
+
+  if (!cleanHex || !/^[0-9a-fA-F]+$/.test(cleanHex)) {
+    return;
+  }
+
+  try {
+    const decoded = await MeshCorePacketDecoder.decodeWithVerification(cleanHex, {});
+    const payload = decoded.payload?.decoded as {
+      channelHash?: string;
+      ciphertext?: string;
+      cipherMac?: string;
+    } | null;
+
+    if (!payload?.channelHash || !payload?.ciphertext || !payload?.cipherMac) {
+      return;
+    }
+
+    const item: QueueItem = {
+      id: nextId++,
+      packetHex: cleanHex,
+      status: 'pending',
+      channelHash: payload.channelHash.toLowerCase(),
+      ciphertext: payload.ciphertext,
+      cipherMac: payload.cipherMac,
+      maxLength,
+      startFromLength: 1,
+    };
+
+    queue.push(item);
+    addRowToTable(item);
+    updateStatusBar();
+
+    processQueue();
+  } catch {
+    // Invalid packet, ignore
+  }
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', async () => {
+  resultsBody = document.getElementById('results-body') as HTMLTableSectionElement;
+  queueCountEl = document.getElementById('queue-count')!;
+  currentStatusEl = document.getElementById('current-status')!;
+  crackedCountEl = document.getElementById('cracked-count')!;
+  failedCountEl = document.getElementById('failed-count')!;
+  currentRateEl = document.getElementById('current-rate')!;
+  knownKeysEl = document.getElementById('known-keys')!;
+  knownKeysListEl = document.getElementById('known-keys-list')!;
+  maxLengthInput = document.getElementById('max-length') as HTMLInputElement;
+
+  const packetInput = document.getElementById('packet-input') as HTMLTextAreaElement;
+  const addBtn = document.getElementById('add-btn') as HTMLButtonElement;
+  const gpuStatus = document.getElementById('gpu-status')!;
+
+  // Filter toggles
+  const timestampFilter = document.getElementById('timestamp-filter') as HTMLInputElement | null;
+  const unicodeFilter = document.getElementById('unicode-filter') as HTMLInputElement | null;
+
+  if (timestampFilter) {
+    timestampFilter.checked = useTimestampFilter;
+    timestampFilter.addEventListener('change', () => {
+      useTimestampFilter = timestampFilter.checked;
+    });
+  }
+
+  if (unicodeFilter) {
+    unicodeFilter.checked = useUnicodeFilter;
+    unicodeFilter.addEventListener('change', () => {
+      useUnicodeFilter = unicodeFilter.checked;
+    });
+  }
+
+  // Initialize GPU
+  if (isWebGpuSupported()) {
+    gpuInstance = await getGpuBruteForce();
+  }
+
+  if (gpuInstance) {
+    gpuStatus.textContent = 'GPU: Ready';
+    gpuStatus.classList.add('success');
+  } else if (isWebGpuSupported()) {
+    gpuStatus.textContent = 'GPU: Init failed';
+    gpuStatus.classList.add('warning');
+  } else {
+    gpuStatus.textContent = 'GPU: Not supported';
+  }
+
+  // Add button handler
+  addBtn.addEventListener('click', () => {
+    const value = packetInput.value.trim();
+    const maxLength = parseInt(maxLengthInput.value) || 6;
+    if (value) {
+      const packets = value.split('\n').filter((p) => p.trim());
+      for (const packet of packets) {
+        addPacket(packet, maxLength);
+      }
+      packetInput.value = '';
+    }
+  });
+
+  // Enter key handler
+  packetInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      addBtn.click();
+    }
+  });
+
+  // Check for packet in URL
+  const urlParams = new URLSearchParams(window.location.search);
+  const packetFromUrl = urlParams.get('packet');
+  if (packetFromUrl) {
+    const maxLength = parseInt(maxLengthInput.value) || 6;
+    addPacket(packetFromUrl, maxLength);
+  }
+});
