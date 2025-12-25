@@ -6,7 +6,7 @@ npm run format
 npm run lint
 
 # Build main bundle
-esbuild src/main.ts \
+npx esbuild src/main.ts \
   --bundle \
   --outfile=dist/bundle.js \
   --format=iife \
@@ -16,7 +16,7 @@ esbuild src/main.ts \
   --minify
 
 # Build bulk bundle
-esbuild src/bulk.ts \
+npx esbuild src/bulk.ts \
   --bundle \
   --outfile=dist/bulk-bundle.js \
   --format=iife \

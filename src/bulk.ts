@@ -30,6 +30,10 @@ interface QueueItem {
   testedUpToLength?: number;
   maxLength: number;
   startFromLength: number;
+  startFromOffset: number;
+  progressPercent?: number;
+  totalCandidates?: number;
+  checkedCount?: number;
   error?: string;
 }
 
@@ -94,6 +98,20 @@ function verifyMacAndFilters(
 }
 
 // Formatting helpers
+function formatTime(seconds: number): string {
+  if (seconds < 60) {
+    return `${Math.round(seconds)}s`;
+  }
+  if (seconds < 3600) {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    return `${mins}m ${secs}s`;
+  }
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.round((seconds % 3600) / 60);
+  return `${hours}h ${mins}m`;
+}
+
 function formatRate(rate: number): string {
   if (rate >= 1000000000) {
     return `${(rate / 1000000000).toFixed(2)} Gkeys/s`;
@@ -143,25 +161,42 @@ function renderRow(item: QueueItem): string {
       statusText = `Pending (max ${item.maxLength})`;
       resultText = '-';
       break;
-    case 'processing':
+    case 'processing': {
       statusClass = 'status-processing';
-      statusText = 'Processing...';
-      resultText = item.testedUpTo ? `Testing #${escapeHtml(item.testedUpTo)}...` : 'Starting...';
+      const pct = item.progressPercent ?? 0;
+      statusText = `Processing ${pct.toFixed(1)}%`;
+      let etaText = '';
+      if (
+        currentRate > 0 &&
+        item.totalCandidates &&
+        item.checkedCount !== undefined &&
+        item.checkedCount > 0
+      ) {
+        const remaining = item.totalCandidates - item.checkedCount;
+        const etaSeconds = remaining / currentRate;
+        etaText = ` (ETA: ${formatTime(etaSeconds)})`;
+      }
+      resultText = item.testedUpTo
+        ? `Testing #${escapeHtml(item.testedUpTo)}...${etaText}`
+        : 'Starting...';
       break;
+    }
     case 'cracked':
       statusClass = 'status-cracked';
       statusText = 'Cracked';
       resultText = item.sender
         ? `<strong>${escapeHtml(item.sender)}:</strong> ${escapeHtml(item.message || '')}`
         : escapeHtml(item.message || '');
+      actionsHtml = `
+        <button class="action-btn skip-btn" data-id="${item.id}" title="Skip this result (MAC collision) and continue searching">Skip</button>
+      `;
       break;
     case 'failed':
       statusClass = 'status-failed';
       statusText = 'Not found';
-      resultText = `No key found up to #${escapeHtml(item.testedUpTo || '?')}`;
+      resultText = `No key found of length ${item.testedUpToLength || '?'}`;
       actionsHtml = `
         <button class="action-btn retry-btn" data-id="${item.id}" title="Retry with higher max length">Retry +1</button>
-        <button class="action-btn skip-btn" data-id="${item.id}" title="Skip this result (MAC collision) and continue searching">Skip</button>
       `;
       break;
   }
@@ -223,11 +258,15 @@ function retryWithHigherLimit(id: number): void {
     return;
   }
 
-  // Increase max length by 1
+  // Increase max length by 1, start from the next length
   item.maxLength = (item.testedUpToLength || item.maxLength) + 1;
   item.startFromLength = (item.testedUpToLength || 1) + 1;
+  item.startFromOffset = 0;
   item.status = 'pending';
   item.testedUpTo = undefined;
+  item.progressPercent = undefined;
+  item.totalCandidates = undefined;
+  item.checkedCount = undefined;
   failedCount--;
 
   updateRow(item);
@@ -235,22 +274,44 @@ function retryWithHigherLimit(id: number): void {
   processQueue();
 }
 
-// Skip MAC collision and continue searching
+// Skip MAC collision and continue searching from where we found the false positive
 function skipAndContinue(id: number): void {
   const item = queue.find((q) => q.id === id);
-  if (!item || item.status !== 'failed') {
+  if (!item || item.status !== 'cracked') {
     return;
   }
 
-  // Continue from where we left off
-  if (item.testedUpTo) {
-    const pos = roomNameToIndex(item.testedUpTo);
+  // Remove this key from known keys so it doesn't match again
+  if (item.channelHash) {
+    knownKeys.delete(item.channelHash);
+    updateKnownKeysDisplay();
+  }
+
+  // Resume from the position after the false positive
+  if (item.roomName) {
+    const pos = roomNameToIndex(item.roomName);
     if (pos) {
       item.startFromLength = pos.length;
+      // Start from the next index after the false positive
+      item.startFromOffset = pos.index + 1;
+      // If we've exhausted this length, move to next
+      if (item.startFromOffset >= countNamesForLength(pos.length)) {
+        item.startFromLength = pos.length + 1;
+        item.startFromOffset = 0;
+      }
     }
   }
+
+  // Clear the cracked result
   item.status = 'pending';
-  failedCount--;
+  item.roomName = undefined;
+  item.key = undefined;
+  item.sender = undefined;
+  item.message = undefined;
+  item.progressPercent = undefined;
+  item.totalCandidates = undefined;
+  item.checkedCount = undefined;
+  crackedCount--;
 
   updateRow(item);
   updateStatusBar();
@@ -318,9 +379,19 @@ async function processItem(item: QueueItem): Promise<void> {
   let currentBatchSize = INITIAL_BATCH_SIZE;
   let batchSizeTuned = false;
 
+  // Calculate total candidates for progress tracking
+  let totalCandidates = 0;
+  for (let l = item.startFromLength; l <= item.maxLength; l++) {
+    totalCandidates += countNamesForLength(l);
+  }
+  // Subtract the offset we're starting from
+  totalCandidates -= item.startFromOffset;
+  item.totalCandidates = totalCandidates;
+
   for (let length = item.startFromLength; length <= item.maxLength; length++) {
     const totalForLength = countNamesForLength(length);
-    let offset = 0;
+    // Use startFromOffset for the first length, then 0 for subsequent lengths
+    let offset = length === item.startFromLength ? item.startFromOffset : 0;
 
     while (offset < totalForLength) {
       const batchSize = Math.min(currentBatchSize, totalForLength - offset);
@@ -385,6 +456,9 @@ async function processItem(item: QueueItem): Promise<void> {
         item.testedUpTo =
           indexToRoomName(length, Math.min(offset, totalForLength - 1)) || item.testedUpTo;
         item.testedUpToLength = length;
+        item.checkedCount = totalChecked;
+        item.progressPercent =
+          totalCandidates > 0 ? Math.min(100, (totalChecked / totalCandidates) * 100) : 0;
         updateRow(item);
         updateStatusBar();
         lastRateUpdate = now;
@@ -469,6 +543,7 @@ async function addPacket(packetHex: string, maxLength: number): Promise<void> {
       cipherMac: payload.cipherMac,
       maxLength,
       startFromLength: 1,
+      startFromOffset: 0,
     };
 
     queue.push(item);
