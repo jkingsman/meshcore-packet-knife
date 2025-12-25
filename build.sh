@@ -25,5 +25,5 @@ npx esbuild src/bulk.ts \
   --sourcemap \
   --minify
 
-# Copy HTML files to dist
-cp index.html bulk.html dist/
+# Copy HTML and wordlist to dist
+cp index.html bulk.html words_alpha.txt dist/

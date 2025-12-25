@@ -34,6 +34,7 @@ interface QueueItem {
   progressPercent?: number;
   totalCandidates?: number;
   checkedCount?: number;
+  skipDictionary?: boolean;
   error?: string;
 }
 
@@ -47,9 +48,50 @@ let crackedCount = 0;
 let failedCount = 0;
 let currentRate = 0;
 
+// Wordlist for dictionary attack
+let wordlist: string[] = [];
+let wordlistLoaded = false;
+
 // Filter settings
 let useTimestampFilter = true;
 let useUnicodeFilter = true;
+
+// Valid room name pattern: a-z, 0-9, dash (not at start/end, no consecutive)
+const VALID_ROOM_CHARS = /^[a-z0-9-]+$/;
+function isValidRoomName(word: string): boolean {
+  if (!word || word.length === 0) {
+    return false;
+  }
+  if (!VALID_ROOM_CHARS.test(word)) {
+    return false;
+  }
+  if (word.startsWith('-') || word.endsWith('-')) {
+    return false;
+  }
+  if (word.includes('--')) {
+    return false;
+  }
+  return true;
+}
+
+// Load wordlist
+async function loadWordlist(): Promise<void> {
+  try {
+    const response = await fetch('./words_alpha.txt');
+    if (!response.ok) {
+      console.warn('Failed to load wordlist:', response.status);
+      return;
+    }
+    const text = await response.text();
+    const allWords = text.split('\n').map((w) => w.trim().toLowerCase());
+    // Filter to valid room names only
+    wordlist = allWords.filter(isValidRoomName);
+    wordlistLoaded = true;
+    console.log(`Loaded ${wordlist.length} valid words from wordlist`);
+  } catch (err) {
+    console.warn('Error loading wordlist:', err);
+  }
+}
 
 // DOM elements
 let resultsBody: HTMLTableSectionElement;
@@ -165,20 +207,30 @@ function renderRow(item: QueueItem): string {
       statusClass = 'status-processing';
       const pct = item.progressPercent ?? 0;
       statusText = `Processing ${pct.toFixed(1)}%`;
-      let etaText = '';
-      if (
-        currentRate > 0 &&
-        item.totalCandidates &&
-        item.checkedCount !== undefined &&
-        item.checkedCount > 0
-      ) {
-        const remaining = item.totalCandidates - item.checkedCount;
-        const etaSeconds = remaining / currentRate;
-        etaText = ` (ETA: ${formatTime(etaSeconds)})`;
+
+      // Check if we're in dictionary mode
+      const inDictMode = item.testedUpTo?.startsWith('dict:');
+
+      if (inDictMode) {
+        const word = item.testedUpTo?.substring(5) || '';
+        resultText = `Dictionary: ${escapeHtml(word)}...`;
+      } else {
+        let etaText = '';
+        if (
+          currentRate > 0 &&
+          item.totalCandidates &&
+          item.checkedCount !== undefined &&
+          item.checkedCount > 0
+        ) {
+          const remaining = item.totalCandidates - item.checkedCount;
+          const etaSeconds = remaining / currentRate;
+          etaText = `; ETA ${formatTime(etaSeconds)}`;
+        }
+        const lengthText = item.testedUpToLength
+          ? `Cracking length ${item.testedUpToLength}`
+          : 'Starting';
+        resultText = `${lengthText}${etaText}`;
       }
-      resultText = item.testedUpTo
-        ? `Testing #${escapeHtml(item.testedUpTo)}...${etaText}`
-        : 'Starting...';
       break;
     }
     case 'cracked':
@@ -188,7 +240,7 @@ function renderRow(item: QueueItem): string {
         ? `<strong>${escapeHtml(item.sender)}:</strong> ${escapeHtml(item.message || '')}`
         : escapeHtml(item.message || '');
       actionsHtml = `
-        <button class="action-btn skip-btn" data-id="${item.id}" title="Skip this result (MAC collision) and continue searching">Skip</button>
+        <button class="action-btn skip-btn" data-id="${item.id}" title="Skip this result (MAC collision) and continue searching">Skip this match and keep looking</button>
       `;
       break;
     case 'failed':
@@ -358,6 +410,60 @@ function tryKnownKeys(item: QueueItem): boolean {
   return false;
 }
 
+// Try dictionary attack on a packet
+async function tryDictionary(item: QueueItem): Promise<boolean> {
+  if (!wordlistLoaded || wordlist.length === 0 || item.skipDictionary) {
+    return false;
+  }
+
+  const targetHashByte = parseInt(item.channelHash!, 16);
+  const startTime = performance.now();
+  let lastUpdate = performance.now();
+  const totalWords = wordlist.length;
+
+  for (let i = 0; i < totalWords; i++) {
+    const word = wordlist[i];
+
+    // Derive key and check channel hash first (fast filter)
+    const key = deriveKeyFromRoomName('#' + word);
+    const channelHash = getChannelHash(key);
+    if (parseInt(channelHash, 16) !== targetHashByte) {
+      continue;
+    }
+
+    // Channel hash matches, verify MAC and filters
+    const result = verifyMacAndFilters(item.ciphertext!, item.cipherMac!, key);
+    if (result.valid) {
+      item.status = 'cracked';
+      item.roomName = word;
+      item.key = key;
+      item.sender = result.sender;
+      item.message = result.message;
+      item.testedUpTo = `dict:${word}`;
+      crackedCount++;
+
+      knownKeys.set(item.channelHash!, { roomName: word, key });
+      updateKnownKeysDisplay();
+      return true;
+    }
+
+    // Update UI periodically
+    const now = performance.now();
+    if (now - lastUpdate >= 200) {
+      const elapsed = (now - startTime) / 1000;
+      currentRate = Math.round(i / elapsed);
+      item.testedUpTo = `dict:${word}`;
+      item.progressPercent = (i / totalWords) * 100;
+      updateRow(item);
+      updateStatusBar();
+      lastUpdate = now;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
+  return false;
+}
+
 // Process a single queue item with brute force
 async function processItem(item: QueueItem): Promise<void> {
   if (!gpuInstance) {
@@ -502,6 +608,16 @@ async function processQueue(): Promise<void> {
       continue;
     }
 
+    // Try dictionary attack
+    if (await tryDictionary(item)) {
+      updateRow(item);
+      updateStatusBar();
+      continue;
+    }
+
+    // Mark dictionary as done so retries skip it
+    item.skipDictionary = true;
+
     // Brute force
     await processItem(item);
     updateRow(item);
@@ -590,10 +706,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Initialize GPU
-  if (isWebGpuSupported()) {
-    gpuInstance = await getGpuBruteForce();
-  }
+  // Load wordlist and initialize GPU in parallel
+  const [, gpuResult] = await Promise.all([
+    loadWordlist(),
+    isWebGpuSupported() ? getGpuBruteForce() : Promise.resolve(null),
+  ]);
+  gpuInstance = gpuResult;
 
   if (gpuInstance) {
     gpuStatus.textContent = 'GPU: Ready';

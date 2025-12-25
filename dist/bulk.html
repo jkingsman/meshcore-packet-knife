@@ -168,14 +168,6 @@
     .known-key-item {
       margin: 4px 0;
     }
-    .back-link {
-      display: inline-block;
-      margin-bottom: 15px;
-      color: #5b8fb9;
-      text-decoration: none;
-      font-size: 13px;
-    }
-    .back-link:hover { text-decoration: underline; }
     .filter-options {
       margin-bottom: 15px;
       padding: 10px 15px;
@@ -211,22 +203,13 @@
     .retry-btn { background: #5b8fb9; }
     .skip-btn { background: #8b6b4a; }
     .skip-btn:hover { background: #7a5d40; }
-    .footer {
-      margin-top: 30px;
-      padding: 15px 0;
-      border-top: 1px solid #ccc;
-      font-size: 12px;
-      color: #666;
-    }
-    .footer a { color: #555; }
   </style>
 </head>
 <body>
-  <a href="index.html" class="back-link">&larr; Back to Packet Knife</a>
   <h1>MeshCore Bulk Cracker</h1>
 
   <div class="input-section">
-    <textarea id="packet-input" placeholder="Paste packet hex here and click Add to Queue (or press Enter)..."></textarea>
+    <textarea id="packet-input" placeholder="Paste packet hex here (one per line) and click Add to Queue (or press Enter)..."></textarea>
     <div class="input-controls">
       <div class="input-row">
         <label for="max-length">Max room length:</label>
@@ -293,10 +276,6 @@
     <div id="known-keys-list" class="known-keys-list"></div>
   </div>
 
-  <footer class="footer">
-    <a href="index.html">Single Packet Mode</a> |
-    <a href="https://github.com/jkingsman/meshcore-packet-knife">GitHub</a>
-  </footer>
 
   <script src="./bulk-bundle.js"></script>
 </body>
