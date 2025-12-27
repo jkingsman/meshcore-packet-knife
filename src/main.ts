@@ -915,7 +915,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (bruteSection) {
       bruteSection.open = true;
     }
-    // Analyze and start cracking
+    // Analyze and start room discovery
     await analyze();
     // Small delay to ensure UI is ready, then click brute force button
     setTimeout(() => {

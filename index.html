@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Decode and analyze MeshCore mesh networking packets. Supports decryption, structure breakdown, and GPU-accelerated brute force key recovery.">
-  <meta name="keywords" content="crack, meshcore, packet, decrypt">
+  <meta name="keywords" content="meshcore, packet, decrypt, room, discover">
   <meta property="og:title" content="MeshCore Packet Knife">
   <meta property="og:description" content="Decode and analyze MeshCore mesh networking packets. Supports decryption, structure breakdown, and GPU-accelerated brute force key recovery.">
   <meta property="og:type" content="website">
@@ -256,10 +256,10 @@
 </head>
 <body>
   <h1>MeshCore Packet Knife</h1>
-  <p style="margin-top: -15px; margin-bottom: 20px; font-size: 13px; color: #666;">Cracking packets in bulk? Try our <a href="./bulk.html">bulk interface</a>.</p>
+  <p style="margin-top: -15px; margin-bottom: 20px; font-size: 13px; color: #666;">Finding room names in bulk? Try our <a href="./bulk.html">bulk interface</a>.</p>
 
   <div class="input-group">
-    <label for="packet">Raw Packet (hex) <button type="button" id="demo-btn-1" class="inline-btn">Load demo packet 1 (with key)</button> <button type="button" id="demo-btn-2" class="inline-btn">Load demo packet 2 (without key; for cracking)</button></label>
+    <label for="packet">Raw Packet (hex) <button type="button" id="demo-btn-1" class="inline-btn">Load demo packet 1 (with key)</button> <button type="button" id="demo-btn-2" class="inline-btn">Load demo packet 2 (without key; for room discovery)</button></label>
     <textarea id="packet" placeholder="Paste hex packet data here (usually from serial or packet aggregator)..."></textarea>
   </div>
 
@@ -278,11 +278,11 @@
   </div>
 
   <details id="brute-section" class="brute-section">
-    <summary>Crack my Packet!</summary>
+    <summary>Find Room Name</summary>
     <div class="brute-content">
       <p class="brute-desc">Search for the room name by trying all valid combinations. Only works for #channel rooms (not private rooms with random keys), and you can't know if a packet was a GroupText to a hashtag room or otherwise. Read more about how this works in <a href="https://github.com/jkingsman/meshcore-packet-knife?tab=readme-ov-file#how-does-this-work">the README</a>.</p>
       <p class="brute-desc">Assumes room names start with #, use only a-z, 0-9, and dash. Dashes cannot be leading, trailing, or consecutive.</p>
-      <p class="brute-desc">Cracking performance is affected by browser throttling when backgrounded; keep the window in the foreground.</p>
+      <p class="brute-desc">Search performance is affected by browser throttling when backgrounded; keep the window in the foreground.</p>
       <p class="brute-desc"><strong>MeshCore is still secure! Nothing is hacked or broken about MeshCore due to this demo. Hashtag rooms are not considered private; this merely demonstrates that reality. MeshCore has strong, modern, secure crypto for private messages and private rooms. Use them, and not hashtag rooms, for private communications, and you're just fine.</strong></p>
       <div class="brute-option-row">
         <label class="gpu-toggle-label">
@@ -327,11 +327,11 @@
   <div id="output" class="output" style="display: none;"></div>
 
   <div class="bookmarklet-section">
-    <a class="bookmarklet-link" href="javascript:(function(){var p=prompt('Enter packet hex:');if(p&&/^[0-9a-fA-F]+$/.test(p.trim().replace(/\s+/g,''))){window.open('https://jkingsman.github.io/meshcore-packet-knife/?packet='+p.trim().replace(/\s+/g,''),'_blank')}})();">Packet Crack Popup</a>
-    <span class="bookmarklet-desc">Drag to your bookmarks bar. Prompts for a packet and opens it for cracking.</span>
+    <a class="bookmarklet-link" href="javascript:(function(){var p=prompt('Enter packet hex:');if(p&&/^[0-9a-fA-F]+$/.test(p.trim().replace(/\s+/g,''))){window.open('https://jkingsman.github.io/meshcore-packet-knife/?packet='+p.trim().replace(/\s+/g,''),'_blank')}})();">Packet Room Finder Popup</a>
+    <span class="bookmarklet-desc">Drag to your bookmarks bar. Prompts for a packet and opens it for room discovery.</span>
     <br><br>
-    <a class="bookmarklet-link" href="javascript:(function(){var p=window.getSelection().toString().trim().replace(/\s+/g,'');if(!p){alert('No text selected. Highlight a packet hex string first.');return}if(!/^[0-9a-fA-F]+$/.test(p)){alert('Selected text is not valid hex.');return}window.open('https://jkingsman.github.io/meshcore-packet-knife/?packet='+p,'_blank')})();">Packet Crack Highlighted Text</a>
-    <span class="bookmarklet-desc">Drag to your bookmarks bar. Highlight packet hex on any page, then click to crack it.</span>
+    <a class="bookmarklet-link" href="javascript:(function(){var p=window.getSelection().toString().trim().replace(/\s+/g,'');if(!p){alert('No text selected. Highlight a packet hex string first.');return}if(!/^[0-9a-fA-F]+$/.test(p)){alert('Selected text is not valid hex.');return}window.open('https://jkingsman.github.io/meshcore-packet-knife/?packet='+p,'_blank')})();">Find Room from Selection</a>
+    <span class="bookmarklet-desc">Drag to your bookmarks bar. Highlight packet hex on any page, then click to discover room name.</span>
   </div>
 
   <footer class="footer">

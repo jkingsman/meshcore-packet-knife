@@ -1,6 +1,6 @@
 # MeshCore Packet Knife
 
-A web-based tool for decoding MeshCore mesh networking packets, with GPU-accelerated brute force key cracking for hashtag rooms.
+A web-based tool for decoding MeshCore mesh networking packets, with GPU-accelerated brute force room name discovery for hashtag rooms.
 
 ## Use it here: https://jkingsman.github.io/meshcore-packet-knife/
 
@@ -26,7 +26,7 @@ npm run build
 npm run serve
 ```
 
-Then open http://localhost:3000/dist in your browser. You can use the rich packet analysis interface, or the more advanced bulk cracker (link under title on the page). If you want to use the bulk cracker to crack live packets from your radio, use the serial cracker link on the bulk page.
+Then open http://localhost:3000/dist in your browser. You can use the rich packet analysis interface, or the more advanced bulk room finder (link under title on the page). If you want to find room names from live packets from your radio, use the serial room finder link on the bulk page.
 
 ### Development
 
@@ -40,7 +40,7 @@ npm run test:watch
 
 ## **How does this work?**
 
-The packet visualization is just a wrapper around [meshcore-decoder](https://github.com/michaelhart/meshcore-decoder). Cracking is probably the part you're interested in, though:
+The packet visualization is just a wrapper around [meshcore-decoder](https://github.com/michaelhart/meshcore-decoder). Room name discovery is probably the part you're interested in, though:
 
 Hashtag rooms (at least in the app I use for Android) have restrictions: alphanum, lowercase, with hyphens, and no leading/trailing/double hypens, with max length of 30. The key for hashtag rooms is the first 16 bytes of the SHA256 of `"#" + roomName`. That's a darn small keyspace, and we have the `channelHash`, which gives us the SHA256 of the valid key; the `cipherMac` gives us further confirmation of a correct key.
 
@@ -66,7 +66,7 @@ Hashtag rooms have keys derived from their names, which makes them easy to share
 
 Depends on your GPU. All hashtag keys of length less than seven are exhaustively bruteforced in about 90s on my 2023 Macbook Air.
 
-## **Can this crack private rooms or direct messages?**
+## **Can this find private room names or direct messages?**
 
 No, statistically speaking. Those use keys that aren't derived from short, predictable room names. The brute force approach here only works because hashtag rooms use `SHA256("#roomname")` as the key, and room names are short strings from a limited character set. Collisions are technically possible, but practically impossible. Thus, if anything, this project should nudge you towards using private messages and channels for anything you don't want the world to read!
 

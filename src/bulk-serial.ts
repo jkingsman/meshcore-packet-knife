@@ -20,7 +20,7 @@ import {
 interface QueueItem {
   id: number;
   packetHex: string;
-  status: 'pending' | 'processing' | 'cracked' | 'failed';
+  status: 'pending' | 'processing' | 'found' | 'failed';
   channelHash?: string;
   ciphertext?: string;
   cipherMac?: string;
@@ -47,7 +47,7 @@ const seenPackets: Set<string> = new Set(); // For duplicate detection
 let nextId = 1;
 let isProcessing = false;
 let gpuInstance: GpuBruteForce | null = null;
-let crackedCount = 0;
+let foundCount = 0;
 let failedCount = 0;
 let currentRate = 0;
 let packetsReceived = 0;
@@ -106,7 +106,7 @@ async function loadWordlist(): Promise<void> {
 let resultsBody: HTMLTableSectionElement;
 let queueCountEl: HTMLElement;
 let currentStatusEl: HTMLElement;
-let crackedCountEl: HTMLElement;
+let foundCountEl: HTMLElement;
 let failedCountEl: HTMLElement;
 let currentRateEl: HTMLElement;
 let knownKeysEl: HTMLElement;
@@ -199,7 +199,7 @@ function updateKnownKeysDisplay(): void {
 // Update status bar
 function updateStatusBar(): void {
   queueCountEl.textContent = String(queue.filter((q) => q.status === 'pending').length);
-  crackedCountEl.textContent = String(crackedCount);
+  foundCountEl.textContent = String(foundCount);
   failedCountEl.textContent = String(failedCount);
   currentRateEl.textContent = currentRate > 0 ? formatRate(currentRate) : '-';
 }
@@ -260,15 +260,15 @@ function renderRow(item: QueueItem): string {
           etaText = `; ETA ${formatTime(etaSeconds)}`;
         }
         const lengthText = item.testedUpToLength
-          ? `Cracking length ${item.testedUpToLength}`
+          ? `Searching length ${item.testedUpToLength}`
           : 'Starting';
         resultText = `${lengthText}${etaText}`;
       }
       break;
     }
-    case 'cracked':
-      statusClass = 'status-cracked';
-      statusText = 'Cracked';
+    case 'found':
+      statusClass = 'status-found';
+      statusText = 'Found';
       resultText = item.sender
         ? `<strong>${escapeHtml(item.sender)}:</strong> ${escapeHtml(item.message || '')}`
         : escapeHtml(item.message || '');
@@ -362,7 +362,7 @@ function retryWithHigherLimit(id: number): void {
 // Skip MAC collision and continue searching from where we found the false positive
 function skipAndContinue(id: number): void {
   const item = queue.find((q) => q.id === id);
-  if (!item || item.status !== 'cracked') {
+  if (!item || item.status !== 'found') {
     return;
   }
 
@@ -387,7 +387,7 @@ function skipAndContinue(id: number): void {
     }
   }
 
-  // Clear the cracked result
+  // Clear the found result
   item.status = 'pending';
   item.roomName = undefined;
   item.key = undefined;
@@ -396,7 +396,7 @@ function skipAndContinue(id: number): void {
   item.progressPercent = undefined;
   item.totalCandidates = undefined;
   item.checkedCount = undefined;
-  crackedCount--;
+  foundCount--;
 
   updateRow(item);
   updateStatusBar();
@@ -414,12 +414,12 @@ function tryKnownKeys(item: QueueItem): boolean {
   if (known) {
     const result = verifyMacAndFilters(item.ciphertext, item.cipherMac, known.key);
     if (result.valid) {
-      item.status = 'cracked';
+      item.status = 'found';
       item.roomName = known.roomName;
       item.key = known.key;
       item.sender = result.sender;
       item.message = result.message;
-      crackedCount++;
+      foundCount++;
       return true;
     }
   }
@@ -429,12 +429,12 @@ function tryKnownKeys(item: QueueItem): boolean {
   if (item.channelHash === publicChannelHash) {
     const result = verifyMacAndFilters(item.ciphertext, item.cipherMac, PUBLIC_KEY);
     if (result.valid) {
-      item.status = 'cracked';
+      item.status = 'found';
       item.roomName = PUBLIC_ROOM_NAME;
       item.key = PUBLIC_KEY;
       item.sender = result.sender;
       item.message = result.message;
-      crackedCount++;
+      foundCount++;
       knownKeys.set(item.channelHash, { roomName: PUBLIC_ROOM_NAME, key: PUBLIC_KEY });
       return true;
     }
@@ -467,13 +467,13 @@ async function tryDictionary(item: QueueItem): Promise<boolean> {
     // Channel hash matches, verify MAC and filters
     const result = verifyMacAndFilters(item.ciphertext!, item.cipherMac!, key);
     if (result.valid) {
-      item.status = 'cracked';
+      item.status = 'found';
       item.roomName = word;
       item.key = key;
       item.sender = result.sender;
       item.message = result.message;
       item.testedUpTo = `dict:${word}`;
-      crackedCount++;
+      foundCount++;
 
       knownKeys.set(item.channelHash!, { roomName: word, key });
       updateKnownKeysDisplay();
@@ -570,13 +570,13 @@ async function processItem(item: QueueItem): Promise<void> {
         const key = deriveKeyFromRoomName('#' + roomName);
         const result = verifyMacAndFilters(item.ciphertext!, item.cipherMac!, key);
         if (result.valid) {
-          item.status = 'cracked';
+          item.status = 'found';
           item.roomName = roomName;
           item.key = key;
           item.sender = result.sender;
           item.message = result.message;
           item.testedUpToLength = length;
-          crackedCount++;
+          foundCount++;
 
           knownKeys.set(item.channelHash!, { roomName, key });
           updateKnownKeysDisplay();
@@ -759,7 +759,7 @@ function setupSerialListeners(conn: typeof WebSerialConnection): void {
       const hexData = toHexString(data.raw);
       const decoded = MeshCorePacketDecoder.decode(hexData);
 
-      // Only process GroupText packets for cracking
+      // Only process GroupText packets for room discovery
       if (decoded.payloadType === PayloadType.GroupText) {
         const maxLength = parseInt(maxLengthInput.value) || 6;
         await addPacket(hexData, maxLength);
@@ -842,7 +842,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   resultsBody = document.getElementById('results-body') as HTMLTableSectionElement;
   queueCountEl = document.getElementById('queue-count')!;
   currentStatusEl = document.getElementById('current-status')!;
-  crackedCountEl = document.getElementById('cracked-count')!;
+  foundCountEl = document.getElementById('found-count')!;
   failedCountEl = document.getElementById('failed-count')!;
   currentRateEl = document.getElementById('current-rate')!;
   knownKeysEl = document.getElementById('known-keys')!;

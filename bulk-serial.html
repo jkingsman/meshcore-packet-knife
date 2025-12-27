@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Bulk crack MeshCore mesh networking packets from radio serial with GPU acceleration.">
-  <title>MeshCore Bulk Cracker (Serial)</title>
+  <meta name="description" content="Bulk room name discovery for MeshCore mesh networking packets from radio serial with GPU acceleration.">
+  <title>MeshCore Bulk Room Finder (Serial)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -121,7 +121,7 @@
       font-family: monospace;
       word-break: break-all;
     }
-    .results-table .status-cracked {
+    .results-table .status-found {
       color: #080;
       font-weight: 500;
     }
@@ -231,7 +231,7 @@
   </style>
 </head>
 <body>
-  <h1>MeshCore Bulk Cracker (Serial)</h1>
+  <h1>MeshCore Bulk Room Finder (Serial)</h1>
 
   <div id="serial-not-supported" class="serial-not-supported" style="display: none;">
     Web Serial API is not supported in this browser. Please use Chrome or Edge.
@@ -262,8 +262,8 @@
       <span id="current-status" class="status-value">Idle</span>
     </div>
     <div class="status-item">
-      <span class="status-label">Cracked:</span>
-      <span id="cracked-count" class="status-value success">0</span>
+      <span class="status-label">Found:</span>
+      <span id="found-count" class="status-value success">0</span>
     </div>
     <div class="status-item">
       <span class="status-label">Failed:</span>
