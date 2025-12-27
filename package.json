@@ -8,7 +8,7 @@
   "scripts": {
     "format": "prettier --write src/",
     "lint": "eslint --fix src/",
-    "build": "./build.sh",
+    "build": "bash build.sh",
     "watch": "esbuild src/main.ts src/bulk.ts --bundle --outdir=dist --format=iife --platform=browser --target=es2020 --sourcemap --watch",
     "serve": "npx serve dist",
     "test": "vitest run",
