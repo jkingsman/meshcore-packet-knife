@@ -15,6 +15,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@liamcottle/meshcore.js": "^1.10.0",
     "@michaelhart/meshcore-decoder": "^0.2.7",
     "crypto-js": "^4.2.0"
   },

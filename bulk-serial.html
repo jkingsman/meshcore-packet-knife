@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Bulk crack MeshCore mesh networking packets with GPU acceleration.">
-  <title>MeshCore Bulk Cracker</title>
+  <meta name="description" content="Bulk crack MeshCore mesh networking packets from radio serial with GPU acceleration.">
+  <title>MeshCore Bulk Cracker (Serial)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -16,26 +16,35 @@
       color: #333;
     }
     h1 { margin-bottom: 20px; font-size: 1.5em; }
-    .input-section {
+    .serial-section {
       display: flex;
       gap: 15px;
       margin-bottom: 20px;
+      align-items: center;
+      flex-wrap: wrap;
     }
-    .input-section textarea {
-      flex: 1;
-      height: 80px;
-      padding: 10px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      font-family: monospace;
-      font-size: 14px;
-      resize: vertical;
-    }
-    .input-controls {
+    .serial-controls {
       display: flex;
-      flex-direction: column;
       gap: 10px;
-      min-width: 200px;
+      align-items: center;
+    }
+    .connection-status {
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .connection-status.disconnected {
+      background: #f8d7da;
+      color: #721c24;
+    }
+    .connection-status.connecting {
+      background: #fff3cd;
+      color: #856404;
+    }
+    .connection-status.connected {
+      background: #d4edda;
+      color: #155724;
     }
     .input-row {
       display: flex;
@@ -203,22 +212,44 @@
     .retry-btn { background: #5b8fb9; }
     .skip-btn { background: #8b6b4a; }
     .skip-btn:hover { background: #7a5d40; }
+    .packets-received {
+      font-size: 12px;
+      color: #666;
+    }
+    .last-packet-time {
+      font-size: 12px;
+      color: #666;
+    }
+    .serial-not-supported {
+      padding: 20px;
+      background: #f8d7da;
+      border: 1px solid #f5c6cb;
+      border-radius: 4px;
+      color: #721c24;
+      margin-bottom: 20px;
+    }
   </style>
 </head>
 <body>
-  <h1>MeshCore Bulk Cracker</h1>
-  <p style="margin-top: -15px; margin-bottom: 20px; font-size: 13px; color: #666;">Want to crack packets right from the radio over serial? Use the <a href="./bulk-serial.html">bulk serial cracker</a>.</p>
+  <h1>MeshCore Bulk Cracker (Serial)</h1>
 
-  <div class="input-section">
-    <textarea id="packet-input" placeholder="Paste packet hex here (one per line) and click Add to Queue (or press Enter)..."></textarea>
-    <div class="input-controls">
-      <div class="input-row">
-        <label for="max-length">Max room length:</label>
-        <input type="number" id="max-length" value="6" min="1" max="20">
-      </div>
-      <button id="add-btn" type="button">Add to Queue</button>
-      <span id="gpu-status" class="gpu-status"></span>
+  <div id="serial-not-supported" class="serial-not-supported" style="display: none;">
+    Web Serial API is not supported in this browser. Please use Chrome or Edge.
+  </div>
+
+  <div class="serial-section">
+    <div class="serial-controls">
+      <button id="connect-btn" type="button">Connect</button>
+      <button id="disconnect-btn" type="button" disabled>Disconnect</button>
+      <span id="connection-status" class="connection-status disconnected">Disconnected</span>
     </div>
+    <div class="input-row">
+      <label for="max-length">Max room length:</label>
+      <input type="number" id="max-length" value="6" min="1" max="20">
+    </div>
+    <span id="gpu-status" class="gpu-status"></span>
+    <span id="packets-received" class="packets-received"></span>
+    <span id="last-packet-time" class="last-packet-time"></span>
   </div>
 
   <div class="status-bar">
@@ -267,7 +298,7 @@
     </thead>
     <tbody id="results-body">
       <tr class="empty-state-row">
-        <td colspan="5" class="empty-state">No packets added yet. Paste a packet above and click Add to Queue.</td>
+        <td colspan="5" class="empty-state">No packets received yet. Connect to a radio to start receiving packets.</td>
       </tr>
     </tbody>
   </table>
@@ -278,6 +309,6 @@
   </div>
 
 
-  <script src="./bulk-bundle.js"></script>
+  <script src="./bulk-serial-bundle.js"></script>
 </body>
 </html>

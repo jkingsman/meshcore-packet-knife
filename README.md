@@ -26,7 +26,7 @@ npm run build
 npm run serve
 ```
 
-Then open http://localhost:3000/dist in your browser.
+Then open http://localhost:3000/dist in your browser. You can use the rich packet analysis interface, or the more advanced bulk cracker (link under title on the page). If you want to use the bulk cracker to crack live packets from your radio, use the serial cracker link on the bulk page.
 
 ### Development
 
