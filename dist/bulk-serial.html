@@ -43,10 +43,11 @@
       <button id="connect-btn" type="button">Connect</button>
       <button id="disconnect-btn" type="button" disabled>Disconnect</button>
       <span id="connection-status" class="connection-status disconnected">Disconnected</span>
+      <button id="nosleep-btn" type="button">Prevent Sleep</button>
     </div>
     <div class="input-row">
       <label for="max-length">Max room length:</label>
-      <input type="number" id="max-length" value="6" min="1" max="20">
+      <input type="number" id="max-length" value="7" min="1" max="20">
     </div>
     <span id="gpu-status" class="status-pill"></span>
     <span id="packets-received" class="status-text"></span>
@@ -69,6 +70,10 @@
     <div class="status-item">
       <span class="status-label">Failed:</span>
       <span id="failed-count" class="status-value warning">0</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">Filtered:</span>
+      <span id="filtered-count" class="status-value">0</span>
     </div>
     <div class="status-item">
       <span class="status-label">Rate:</span>

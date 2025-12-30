@@ -41,6 +41,49 @@ interface QueueItem {
 // State
 const queue: QueueItem[] = [];
 const knownKeys: Map<string, { roomName: string; key: string }> = new Map();
+
+// LocalStorage key for persisting known room keys
+const KNOWN_KEYS_STORAGE_KEY = 'meshcore-known-room-keys';
+
+// Load known keys from localStorage
+function loadKnownKeysFromStorage(): void {
+  try {
+    const stored = localStorage.getItem(KNOWN_KEYS_STORAGE_KEY);
+    if (stored) {
+      const entries: [string, { roomName: string; key: string }][] = JSON.parse(stored);
+      for (const [channelHash, value] of entries) {
+        knownKeys.set(channelHash, value);
+      }
+    }
+  } catch {
+    // Ignore parse errors, start with empty map
+  }
+}
+
+// Save known keys to localStorage
+function saveKnownKeysToStorage(): void {
+  try {
+    const entries = Array.from(knownKeys.entries());
+    localStorage.setItem(KNOWN_KEYS_STORAGE_KEY, JSON.stringify(entries));
+  } catch {
+    // Ignore storage errors (e.g., quota exceeded)
+  }
+}
+
+// Add a known key (and persist)
+function addKnownKey(channelHash: string, roomName: string, key: string): void {
+  knownKeys.set(channelHash, { roomName, key });
+  saveKnownKeysToStorage();
+  updateKnownKeysDisplay();
+}
+
+// Remove a known key (and persist)
+function removeKnownKey(channelHash: string): void {
+  knownKeys.delete(channelHash);
+  saveKnownKeysToStorage();
+  updateKnownKeysDisplay();
+}
+
 let nextId = 1;
 let isProcessing = false;
 let gpuInstance: GpuBruteForce | null = null;
@@ -335,8 +378,7 @@ function skipAndContinue(id: number): void {
 
   // Remove this key from known keys so it doesn't match again
   if (item.channelHash) {
-    knownKeys.delete(item.channelHash);
-    updateKnownKeysDisplay();
+    removeKnownKey(item.channelHash);
   }
 
   // Resume from the position after the false positive
@@ -402,7 +444,7 @@ function tryKnownKeys(item: QueueItem): boolean {
       item.sender = result.sender;
       item.message = result.message;
       foundCount++;
-      knownKeys.set(item.channelHash, { roomName: PUBLIC_ROOM_NAME, key: PUBLIC_KEY });
+      addKnownKey(item.channelHash, PUBLIC_ROOM_NAME, PUBLIC_KEY);
       return true;
     }
   }
@@ -442,8 +484,7 @@ async function tryDictionary(item: QueueItem): Promise<boolean> {
       item.testedUpTo = `dict:${word}`;
       foundCount++;
 
-      knownKeys.set(item.channelHash!, { roomName: word, key });
-      updateKnownKeysDisplay();
+      addKnownKey(item.channelHash!, word, key);
       return true;
     }
 
@@ -545,8 +586,7 @@ async function processItem(item: QueueItem): Promise<void> {
           item.testedUpToLength = length;
           foundCount++;
 
-          knownKeys.set(item.channelHash!, { roomName, key });
-          updateKnownKeysDisplay();
+          addKnownKey(item.channelHash!, roomName, key);
 
           return;
         }
@@ -683,6 +723,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   knownKeysEl = document.getElementById('known-keys')!;
   knownKeysListEl = document.getElementById('known-keys-list')!;
   maxLengthInput = document.getElementById('max-length') as HTMLInputElement;
+
+  // Load known keys from localStorage and update display
+  loadKnownKeysFromStorage();
+  updateKnownKeysDisplay();
 
   const packetInput = document.getElementById('packet-input') as HTMLTextAreaElement;
   const addBtn = document.getElementById('add-btn') as HTMLButtonElement;

@@ -1,6 +1,7 @@
 import { MeshCorePacketDecoder, ChannelCrypto, PayloadType } from '@michaelhart/meshcore-decoder';
 // @ts-expect-error - meshcore.js doesn't have type definitions
 import { WebSerialConnection, Constants } from '@liamcottle/meshcore.js';
+import NoSleep from 'nosleep.js';
 import { getGpuBruteForce, isWebGpuSupported, GpuBruteForce } from './gpu-bruteforce';
 import {
   PUBLIC_ROOM_NAME,
@@ -44,13 +45,60 @@ interface QueueItem {
 const queue: QueueItem[] = [];
 const knownKeys: Map<string, { roomName: string; key: string }> = new Map();
 const seenPackets: Set<string> = new Set(); // For duplicate detection
+
+// LocalStorage key for persisting known room keys
+const KNOWN_KEYS_STORAGE_KEY = 'meshcore-known-room-keys';
+
+// Load known keys from localStorage
+function loadKnownKeysFromStorage(): void {
+  try {
+    const stored = localStorage.getItem(KNOWN_KEYS_STORAGE_KEY);
+    if (stored) {
+      const entries: [string, { roomName: string; key: string }][] = JSON.parse(stored);
+      for (const [channelHash, value] of entries) {
+        knownKeys.set(channelHash, value);
+      }
+    }
+  } catch {
+    // Ignore parse errors, start with empty map
+  }
+}
+
+// Save known keys to localStorage
+function saveKnownKeysToStorage(): void {
+  try {
+    const entries = Array.from(knownKeys.entries());
+    localStorage.setItem(KNOWN_KEYS_STORAGE_KEY, JSON.stringify(entries));
+  } catch {
+    // Ignore storage errors (e.g., quota exceeded)
+  }
+}
+
+// Add a known key (and persist)
+function addKnownKey(channelHash: string, roomName: string, key: string): void {
+  knownKeys.set(channelHash, { roomName, key });
+  saveKnownKeysToStorage();
+  updateKnownKeysDisplay();
+}
+
+// Remove a known key (and persist)
+function removeKnownKey(channelHash: string): void {
+  knownKeys.delete(channelHash);
+  saveKnownKeysToStorage();
+  updateKnownKeysDisplay();
+}
 let nextId = 1;
 let isProcessing = false;
 let gpuInstance: GpuBruteForce | null = null;
 let foundCount = 0;
 let failedCount = 0;
+let filteredCount = 0;
 let currentRate = 0;
 let packetsReceived = 0;
+
+// NoSleep instance for preventing screen sleep
+let noSleep: NoSleep | null = null;
+let noSleepEnabled = false;
 
 // Serial connection state
 let connection: typeof WebSerialConnection | null = null;
@@ -157,10 +205,12 @@ let queueCountEl: HTMLElement;
 let currentStatusEl: HTMLElement;
 let foundCountEl: HTMLElement;
 let failedCountEl: HTMLElement;
+let filteredCountEl: HTMLElement;
 let currentRateEl: HTMLElement;
 let knownKeysEl: HTMLElement;
 let knownKeysListEl: HTMLElement;
 let maxLengthInput: HTMLInputElement;
+let noSleepBtn: HTMLButtonElement;
 let connectBtn: HTMLButtonElement;
 let disconnectBtn: HTMLButtonElement;
 let connectionStatusEl: HTMLElement;
@@ -417,8 +467,7 @@ function skipAndContinue(id: number): void {
 
   // Remove this key from known keys so it doesn't match again
   if (item.channelHash) {
-    knownKeys.delete(item.channelHash);
-    updateKnownKeysDisplay();
+    removeKnownKey(item.channelHash);
   }
 
   // Resume from the position after the false positive
@@ -484,7 +533,7 @@ function tryKnownKeys(item: QueueItem): boolean {
       item.sender = result.sender;
       item.message = result.message;
       foundCount++;
-      knownKeys.set(item.channelHash, { roomName: PUBLIC_ROOM_NAME, key: PUBLIC_KEY });
+      addKnownKey(item.channelHash, PUBLIC_ROOM_NAME, PUBLIC_KEY);
       return true;
     }
   }
@@ -524,8 +573,7 @@ async function tryDictionary(item: QueueItem): Promise<boolean> {
       item.testedUpTo = `dict:${word}`;
       foundCount++;
 
-      knownKeys.set(item.channelHash!, { roomName: word, key });
-      updateKnownKeysDisplay();
+      addKnownKey(item.channelHash!, word, key);
       return true;
     }
 
@@ -627,8 +675,7 @@ async function processItem(item: QueueItem): Promise<void> {
           item.testedUpToLength = length;
           foundCount++;
 
-          knownKeys.set(item.channelHash!, { roomName, key });
-          updateKnownKeysDisplay();
+          addKnownKey(item.channelHash!, roomName, key);
 
           return;
         }
@@ -741,6 +788,8 @@ async function addPacket(packetHex: string, maxLength: number): Promise<void> {
 
     // Check for duplicates based on ciphertext (same message via different relay paths)
     if (seenPackets.has(payload.ciphertext)) {
+      filteredCount++;
+      filteredCountEl.textContent = String(filteredCount);
       return;
     }
 
@@ -751,6 +800,8 @@ async function addPacket(packetHex: string, maxLength: number): Promise<void> {
     if (
       shouldIgnorePacket(payload.channelHash.toLowerCase(), payload.ciphertext, payload.cipherMac)
     ) {
+      filteredCount++;
+      filteredCountEl.textContent = String(filteredCount);
       return;
     }
 
@@ -901,15 +952,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   currentStatusEl = document.getElementById('current-status')!;
   foundCountEl = document.getElementById('found-count')!;
   failedCountEl = document.getElementById('failed-count')!;
+  filteredCountEl = document.getElementById('filtered-count')!;
   currentRateEl = document.getElementById('current-rate')!;
   knownKeysEl = document.getElementById('known-keys')!;
   knownKeysListEl = document.getElementById('known-keys-list')!;
   maxLengthInput = document.getElementById('max-length') as HTMLInputElement;
+  noSleepBtn = document.getElementById('nosleep-btn') as HTMLButtonElement;
   connectBtn = document.getElementById('connect-btn') as HTMLButtonElement;
   disconnectBtn = document.getElementById('disconnect-btn') as HTMLButtonElement;
   connectionStatusEl = document.getElementById('connection-status')!;
   packetsReceivedEl = document.getElementById('packets-received')!;
   lastPacketTimeEl = document.getElementById('last-packet-time')!;
+
+  // Load known keys from localStorage and update display
+  loadKnownKeysFromStorage();
+  updateKnownKeysDisplay();
 
   const gpuStatus = document.getElementById('gpu-status')!;
   const serialNotSupported = document.getElementById('serial-not-supported')!;
@@ -969,4 +1026,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Serial button handlers
   connectBtn.addEventListener('click', connectToRadio);
   disconnectBtn.addEventListener('click', disconnectFromRadio);
+
+  // NoSleep button handler - must be in user event to work
+  noSleep = new NoSleep();
+  noSleepBtn.addEventListener('click', () => {
+    if (noSleepEnabled) {
+      noSleep!.disable();
+      noSleepEnabled = false;
+      noSleepBtn.textContent = 'Prevent Sleep';
+    } else {
+      noSleep!.enable();
+      noSleepEnabled = true;
+      noSleepBtn.textContent = 'Allow Sleep';
+    }
+  });
 });

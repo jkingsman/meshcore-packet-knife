@@ -17,7 +17,8 @@
   "dependencies": {
     "@liamcottle/meshcore.js": "^1.10.0",
     "@michaelhart/meshcore-decoder": "^0.2.7",
-    "crypto-js": "^4.2.0"
+    "crypto-js": "^4.2.0",
+    "nosleep.js": "^0.12.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
