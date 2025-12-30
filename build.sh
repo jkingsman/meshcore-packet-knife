@@ -61,5 +61,22 @@ npx esbuild src/radio-config.ts \
   --external:child_process \
   --external:@serialport/*
 
+# Build raw-packets bundle
+npx esbuild src/raw-packets.ts \
+  --bundle \
+  --outfile=dist/raw-packets-bundle.js \
+  --format=iife \
+  --platform=browser \
+  --target=es2020 \
+  --sourcemap \
+  --minify \
+  --external:net \
+  --external:stream \
+  --external:util \
+  --external:fs \
+  --external:events \
+  --external:child_process \
+  --external:@serialport/*
+
 # Copy HTML, CSS, and wordlist to dist
-cp index.html bulk.html bulk-serial.html radio-config.html styles.css words_alpha.txt dist/
+cp index.html bulk.html bulk-serial.html radio-config.html raw-packets.html styles.css words_alpha.txt dist/

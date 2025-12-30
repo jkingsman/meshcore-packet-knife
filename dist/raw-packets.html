@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Raw packet feed from MeshCore radio over serial connection.">
+  <title>MeshCore Raw Packet Feed</title>
+  <link rel="stylesheet" href="./styles.css">
+  <style>
+    body { max-width: 1200px; }
+
+    /* Serial controls section */
+    .serial-section {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 20px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .serial-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    /* Packet table */
+    .packet-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .packet-table th,
+    .packet-table td {
+      padding: 8px 10px;
+      text-align: left;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .packet-table th {
+      background: #f5f5f5;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .packet-table tbody tr:hover {
+      background: #f8f8f8;
+    }
+
+    /* Packet hex display */
+    .packet-hex {
+      font-family: monospace;
+      font-size: 11px;
+      word-break: break-all;
+      max-width: 400px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .packet-hex:hover {
+      white-space: normal;
+      overflow: visible;
+    }
+
+    /* Pills for route and payload type */
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 500;
+      margin-right: 4px;
+    }
+
+    .pill-route {
+      background: #e3f2fd;
+      color: #1565c0;
+    }
+
+    .pill-payload {
+      background: #f3e5f5;
+      color: #7b1fa2;
+    }
+
+    .pill-grouptext {
+      background: #fff3e0;
+      color: #e65100;
+    }
+
+    .pill-advert {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    /* Analyze link */
+    .analyze-link {
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    /* Scroll container */
+    .packet-container {
+      max-height: 70vh;
+      overflow-y: auto;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+    }
+
+    /* Status text */
+    .status-text {
+      font-size: 12px;
+      color: #666;
+    }
+
+    /* Timestamp column */
+    .timestamp-col {
+      white-space: nowrap;
+      font-family: monospace;
+      font-size: 12px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h1>MeshCore Raw Packet Feed</h1>
+  <p class="subtitle">Analyzing packets? Use our <a href="./index.html">single packet analyzer</a>, <a href="./bulk.html">multi-packet bulk interface</a>, or <a href="./bulk-serial.html">ingest all GroupTexts over serial</a>.<br>Need to configure your radio? Use the <a href="./radio-config.html">radio config tool</a>.</p>
+
+  <div id="serial-not-supported" class="alert-box" style="display: none;">
+    Web Serial API is not supported in this browser. Please use Chrome or Edge.
+  </div>
+
+  <div class="serial-section">
+    <div class="serial-controls">
+      <button id="connect-btn" type="button">Connect</button>
+      <button id="disconnect-btn" type="button" disabled>Disconnect</button>
+      <span id="connection-status" class="connection-status disconnected">Disconnected</span>
+    </div>
+    <span id="radio-info" class="status-text"></span>
+    <span id="packet-count" class="status-text"></span>
+    <button id="clear-btn" type="button">Clear</button>
+    <label class="checkbox-row" style="margin: 0;">
+      <input type="checkbox" id="auto-scroll" checked>
+      <span>Auto-scroll</span>
+    </label>
+  </div>
+
+  <div class="packet-container">
+    <table class="packet-table">
+      <thead>
+        <tr>
+          <th style="width: 80px;">Time</th>
+          <th style="width: 180px;">Type</th>
+          <th>Packet Data</th>
+          <th style="width: 80px;">Action</th>
+        </tr>
+      </thead>
+      <tbody id="packet-body">
+        <tr class="empty-state-row">
+          <td colspan="4" class="empty-state">No packets received yet. Connect to a radio to start receiving packets.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script src="./raw-packets-bundle.js"></script>
+</body>
+</html>
