@@ -65,6 +65,55 @@ let wordlistLoaded = false;
 let useTimestampFilter = true;
 let useUnicodeFilter = true;
 
+// Ignored rooms - maps channelHash to room name for quick lookup
+const ignoredRooms: Map<string, string> = new Map();
+
+// Parse ignore list and compute keys
+function updateIgnoredRooms(ignoreListStr: string): void {
+  ignoredRooms.clear();
+  const rooms = ignoreListStr
+    .split(',')
+    .map((r) => r.trim())
+    .filter((r) => r.length > 0);
+
+  for (const room of rooms) {
+    let key: string;
+    let displayName: string;
+
+    if (room === '[[public room]]' || room === PUBLIC_ROOM_NAME) {
+      key = PUBLIC_KEY;
+      displayName = PUBLIC_ROOM_NAME;
+    } else {
+      // Add # prefix if not present for key derivation
+      const roomWithHash = room.startsWith('#') ? room : '#' + room;
+      key = deriveKeyFromRoomName(roomWithHash);
+      displayName = room.startsWith('#') ? room : '#' + room;
+    }
+
+    const channelHash = getChannelHash(key);
+    ignoredRooms.set(channelHash, displayName);
+  }
+}
+
+// Check if a packet should be ignored (decrypts with an ignored room's key)
+function shouldIgnorePacket(channelHash: string, ciphertext: string, cipherMac: string): boolean {
+  // First check if channel hash matches any ignored room
+  const ignoredRoom = ignoredRooms.get(channelHash);
+  if (!ignoredRoom) {
+    return false;
+  }
+
+  // Channel hash matches, verify MAC to confirm
+  let key: string;
+  if (ignoredRoom === PUBLIC_ROOM_NAME) {
+    key = PUBLIC_KEY;
+  } else {
+    key = deriveKeyFromRoomName(ignoredRoom);
+  }
+
+  return verifyMac(ciphertext, cipherMac, key);
+}
+
 // Valid room name pattern: a-z, 0-9, dash (not at start/end, no consecutive)
 const VALID_ROOM_CHARS = /^[a-z0-9-]+$/;
 function isValidRoomName(word: string): boolean {
@@ -695,8 +744,16 @@ async function addPacket(packetHex: string, maxLength: number): Promise<void> {
       return;
     }
 
-    // Mark ciphertext as seen
+    // Mark ciphertext as seen (even if ignored, so we don't re-process)
     seenPackets.add(payload.ciphertext);
+
+    // Check if this packet is from an ignored room
+    if (
+      shouldIgnorePacket(payload.channelHash.toLowerCase(), payload.ciphertext, payload.cipherMac)
+    ) {
+      return;
+    }
+
     packetsReceived++;
     updatePacketsReceivedDisplay();
 
@@ -878,6 +935,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     unicodeFilter.checked = useUnicodeFilter;
     unicodeFilter.addEventListener('change', () => {
       useUnicodeFilter = unicodeFilter.checked;
+    });
+  }
+
+  // Ignore rooms input
+  const ignoreRoomsInput = document.getElementById('ignore-rooms') as HTMLInputElement | null;
+  if (ignoreRoomsInput) {
+    // Initialize with default values
+    updateIgnoredRooms(ignoreRoomsInput.value);
+    // Update on change
+    ignoreRoomsInput.addEventListener('input', () => {
+      updateIgnoredRooms(ignoreRoomsInput.value);
     });
   }
 

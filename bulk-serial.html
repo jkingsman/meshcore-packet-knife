@@ -284,6 +284,10 @@
       <input type="checkbox" id="unicode-filter" checked>
       <span>Ignore keys resulting in invalid UTF-8</span>
     </label>
+    <div class="filter-option" style="flex-direction: column; align-items: flex-start; gap: 4px;">
+      <label for="ignore-rooms">Ignore messages from rooms (comma-separated):</label>
+      <input type="text" id="ignore-rooms" value="bot, bots, test, testing, [[public room]]" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;">
+    </div>
   </div>
 
   <table class="results-table">
