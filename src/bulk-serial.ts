@@ -145,7 +145,7 @@ async function loadWordlist(): Promise<void> {
     // Filter to valid room names only
     wordlist = allWords.filter(isValidRoomName);
     wordlistLoaded = true;
-    console.log(`Loaded ${wordlist.length} valid words from wordlist`);
+    // Wordlist loaded successfully
   } catch (err) {
     console.warn('Error loading wordlist:', err);
   }

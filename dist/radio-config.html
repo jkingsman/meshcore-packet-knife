@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Configure MeshCore radio settings over serial connection.">
+  <title>MeshCore Radio Config</title>
+  <link rel="stylesheet" href="./styles.css">
+  <style>
+    body { max-width: 900px; }
+
+    .config-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 700px) {
+      .config-grid { grid-template-columns: 1fr; }
+    }
+
+    .config-section {
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 15px;
+    }
+
+    .config-section h3 {
+      margin: 0 0 15px 0;
+      font-size: 14px;
+      color: #555;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 8px;
+    }
+
+    .config-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .config-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .config-row label {
+      min-width: 100px;
+      font-size: 13px;
+      margin-bottom: 0;
+    }
+
+    .config-row input[type="text"],
+    .config-row input[type="number"] {
+      flex: 1;
+      padding: 6px 8px;
+      font-size: 13px;
+    }
+
+    .config-row input[type="number"] {
+      width: auto;
+    }
+
+    .config-row .unit {
+      font-size: 12px;
+      color: #666;
+      min-width: 40px;
+    }
+
+    /* Serial controls */
+    .serial-section {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 20px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .serial-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .action-section {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .action-section button {
+      min-width: 120px;
+    }
+
+    /* Status log */
+    .status-log {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 12px;
+      height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .status-log .log-error { color: #f48771; }
+    .status-log .log-success { color: #89d185; }
+    .status-log .log-info { color: #6796e6; }
+    .status-log .log-warn { color: #cca700; }
+
+    /* Full width section */
+    .full-width {
+      grid-column: 1 / -1;
+    }
+
+    /* Key input styling */
+    .key-input {
+      font-family: monospace;
+      text-transform: lowercase;
+    }
+
+    /* Sync time button */
+    .sync-btn {
+      padding: 4px 8px;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    /* Select dropdown */
+    .config-row select {
+      flex: 1;
+      padding: 6px 8px;
+      font-size: 13px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+
+    /* Read-only inputs */
+    .config-row input[readonly] {
+      background: #f5f5f5;
+      color: #666;
+    }
+
+    /* Checkbox in label */
+    .config-row label input[type="checkbox"] {
+      margin-right: 8px;
+    }
+
+    /* Info values (read-only text) */
+    .info-value {
+      font-family: monospace;
+      font-size: 13px;
+      color: #333;
+    }
+
+    /* Tuning grid */
+    .tuning-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px 20px;
+    }
+
+    @media (max-width: 500px) {
+      .tuning-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <h1>MeshCore Radio Config</h1>
+  <p class="subtitle">Configure radio settings over serial. See also: <a href="./bulk-serial.html">Bulk Room Finder (Serial)</a></p>
+
+  <div id="serial-not-supported" class="alert-box" style="display: none;">
+    Web Serial API is not supported in this browser. Please use Chrome or Edge.
+  </div>
+
+  <div class="serial-section">
+    <div class="serial-controls">
+      <button id="connect-btn" type="button">Connect</button>
+      <button id="disconnect-btn" type="button" disabled>Disconnect</button>
+      <span id="connection-status" class="connection-status disconnected">Disconnected</span>
+    </div>
+  </div>
+
+  <div class="action-section">
+    <button id="load-btn" type="button" disabled>Load from Radio</button>
+    <button id="write-btn" type="button" disabled>Write to Radio</button>
+    <button id="reboot-btn" type="button" disabled>Reboot Radio</button>
+  </div>
+
+  <div class="config-grid">
+    <div class="config-section">
+      <h3>Identity</h3>
+      <div class="config-row">
+        <label for="radio-name">Name</label>
+        <input type="text" id="radio-name" placeholder="Radio name" maxlength="32">
+      </div>
+      <div class="config-row">
+        <label for="node-type">Node Type</label>
+        <select id="node-type">
+          <option value="0">None</option>
+          <option value="1">Chat</option>
+          <option value="2">Repeater</option>
+          <option value="3">Room</option>
+        </select>
+      </div>
+      <div class="config-row">
+        <label for="private-key">Private Key</label>
+        <input type="text" id="private-key" class="key-input" placeholder="64 bytes hex (128 chars)" maxlength="128" pattern="[0-9a-fA-F]*">
+      </div>
+      <div class="config-row">
+        <label for="public-key">Public Key</label>
+        <input type="text" id="public-key" class="key-input" placeholder="(read from device)" readonly>
+      </div>
+    </div>
+
+    <div class="config-section">
+      <h3>Location</h3>
+      <div class="config-row">
+        <label for="latitude">Latitude</label>
+        <input type="number" id="latitude" step="0.000001" min="-90" max="90" placeholder="0.000000">
+        <span class="unit">&deg;</span>
+      </div>
+      <div class="config-row">
+        <label for="longitude">Longitude</label>
+        <input type="number" id="longitude" step="0.000001" min="-180" max="180" placeholder="0.000000">
+        <span class="unit">&deg;</span>
+      </div>
+    </div>
+
+    <div class="config-section">
+      <h3>Radio Parameters <button type="button" id="usa-preset-btn" class="sync-btn">USA Preset</button></h3>
+      <div class="config-row">
+        <label for="frequency">Frequency</label>
+        <input type="number" id="frequency" step="0.001" min="100" max="1000" placeholder="906.875">
+        <span class="unit">MHz</span>
+      </div>
+      <div class="config-row">
+        <label for="bandwidth">Bandwidth</label>
+        <input type="number" id="bandwidth" step="0.001" min="0" max="1000" placeholder="250">
+        <span class="unit">kHz</span>
+      </div>
+      <div class="config-row">
+        <label for="spreading-factor">Spreading Factor</label>
+        <input type="number" id="spreading-factor" min="6" max="12" placeholder="10">
+        <span class="unit">SF</span>
+      </div>
+      <div class="config-row">
+        <label for="coding-rate">Coding Rate</label>
+        <input type="number" id="coding-rate" min="5" max="8" placeholder="6">
+        <span class="unit">CR</span>
+      </div>
+    </div>
+
+    <div class="config-section">
+      <h3>Power &amp; Time</h3>
+      <div class="config-row">
+        <label for="tx-power">TX Power</label>
+        <input type="number" id="tx-power" min="0" max="30" placeholder="20">
+        <span class="unit">dBm</span>
+      </div>
+      <div class="config-row">
+        <label for="max-tx-power">Max TX Power</label>
+        <input type="number" id="max-tx-power" readonly>
+        <span class="unit">dBm</span>
+      </div>
+      <div class="config-row">
+        <label for="device-time">Device Time</label>
+        <input type="number" id="device-time" placeholder="Unix timestamp">
+        <button type="button" id="sync-time-btn" class="sync-btn">Use Current</button>
+      </div>
+    </div>
+
+    <div class="config-section">
+      <h3>Behavior</h3>
+      <div class="config-row">
+        <label for="manual-add-contacts">
+          <input type="checkbox" id="manual-add-contacts">
+          Manual Add Contacts
+        </label>
+      </div>
+      <div class="config-row">
+        <label for="multi-acks">Multi Acks</label>
+        <input type="number" id="multi-acks" min="0" max="255" placeholder="0">
+      </div>
+      <div class="config-row">
+        <label for="advert-loc-policy">Advert Loc Policy</label>
+        <select id="advert-loc-policy">
+          <option value="0">0 - Never</option>
+          <option value="1">1 - Always</option>
+          <option value="2">2 - Contacts Only</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="config-section">
+      <h3>Telemetry Mode</h3>
+      <div class="config-row">
+        <label for="telemetry-base">Base</label>
+        <select id="telemetry-base">
+          <option value="0">0 - Off</option>
+          <option value="1">1 - Local</option>
+          <option value="2">2 - On Request</option>
+          <option value="3">3 - Always</option>
+        </select>
+      </div>
+      <div class="config-row">
+        <label for="telemetry-loc">Location</label>
+        <select id="telemetry-loc">
+          <option value="0">0 - Off</option>
+          <option value="1">1 - Local</option>
+          <option value="2">2 - On Request</option>
+          <option value="3">3 - Always</option>
+        </select>
+      </div>
+      <div class="config-row">
+        <label for="telemetry-env">Environment</label>
+        <select id="telemetry-env">
+          <option value="0">0 - Off</option>
+          <option value="1">1 - Local</option>
+          <option value="2">2 - On Request</option>
+          <option value="3">3 - Always</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="config-section">
+      <h3>Security</h3>
+      <div class="config-row">
+        <label for="ble-pin">BLE PIN</label>
+        <input type="number" id="ble-pin" min="0" max="999999" placeholder="(write-only)">
+      </div>
+    </div>
+
+    <div class="config-section">
+      <h3>Device Info</h3>
+      <div class="config-row">
+        <label>Firmware</label>
+        <span id="firmware-info" class="info-value">-</span>
+      </div>
+      <div class="config-row">
+        <label>Model</label>
+        <span id="model-info" class="info-value">-</span>
+      </div>
+    </div>
+
+    <div class="config-section full-width">
+      <h3>Advanced Tuning <span class="muted">(write-only, not readable from device)</span></h3>
+      <div class="tuning-grid">
+        <div class="config-row">
+          <label for="rx-delay">RX Delay</label>
+          <input type="number" id="rx-delay" min="0" placeholder="e.g. 0">
+          <span class="unit">ms</span>
+        </div>
+        <div class="config-row">
+          <label for="advert-interval">Advert Interval</label>
+          <input type="number" id="advert-interval" min="0" placeholder="e.g. 900">
+          <span class="unit">sec</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="config-section full-width">
+      <h3>Status Log</h3>
+      <div id="status-log" class="status-log"></div>
+    </div>
+  </div>
+
+  <script src="./radio-config-bundle.js"></script>
+</body>
+</html>

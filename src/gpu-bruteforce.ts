@@ -412,14 +412,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
   async init(): Promise<boolean> {
     if (!navigator.gpu) {
-      console.log('WebGPU not supported');
+      console.warn('WebGPU not supported');
       return false;
     }
 
     try {
       const adapter = await navigator.gpu.requestAdapter();
       if (!adapter) {
-        console.log('No GPU adapter found');
+        console.warn('No GPU adapter found');
         return false;
       }
 

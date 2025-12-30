@@ -4,6 +4,8 @@ import {
   DecodedPacket,
   PacketStructure,
   ChannelCrypto,
+  GroupTextPayload,
+  PayloadData,
 } from '@michaelhart/meshcore-decoder';
 import { getGpuBruteForce, isWebGpuSupported, GpuBruteForce } from './gpu-bruteforce';
 import {
@@ -391,10 +393,7 @@ async function bruteForceGpu(
         );
         currentBatchSize = Math.max(MIN_BATCH_SIZE, rounded);
         batchSizeTuned = true;
-        console.log(
-          `GPU auto-tune: ${batchSize.toLocaleString()} keys in ${dispatchTime.toFixed(1)}ms ` +
-            `(scale=${scaleFactor.toFixed(1)}x) → batch size ${currentBatchSize.toLocaleString()}`,
-        );
+        // Auto-tuned batch size based on dispatch time
       }
 
       // Verify MAC for each match (on CPU)
@@ -459,7 +458,11 @@ async function bruteForceGpu(
   return { found: false };
 }
 
-function formatPayload(decoded: any, keyUsed: string | null, isEncryptedPayload: boolean): string {
+function formatPayload(
+  decoded: PayloadData,
+  keyUsed: string | null,
+  isEncryptedPayload: boolean,
+): string {
   if (decoded.decrypted) {
     const keyInfo = keyUsed ? ` with key ${keyUsed.substring(0, 8)}...` : '';
     const timestamp = new Date(decoded.decrypted.timestamp * 1000).toISOString();
@@ -833,7 +836,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    const decoded = lastPacket.payload.decoded as any;
+    const decoded = lastPacket.payload.decoded as GroupTextPayload;
     if (!decoded.channelHash || !decoded.ciphertext || !decoded.cipherMac) {
       return;
     }

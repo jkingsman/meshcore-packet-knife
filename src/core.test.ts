@@ -38,7 +38,9 @@ describe('roomNameToIndex', () => {
   });
 
   it('should return null for null/undefined', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(roomNameToIndex(null as any)).toBeNull();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(roomNameToIndex(undefined as any)).toBeNull();
   });
 
@@ -213,6 +215,7 @@ describe('escapeHtml', () => {
   });
 
   it('should convert non-strings to strings', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect(escapeHtml(123 as any)).toBe('123');
   });
 });
