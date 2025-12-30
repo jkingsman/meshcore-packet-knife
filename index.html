@@ -10,44 +10,18 @@
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://jkingsman.github.io/meshcore-packet-knife/">
   <title>MeshCore Packet Knife</title>
+  <link rel="stylesheet" href="./styles.css">
   <style>
-    * { box-sizing: border-box; }
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 20px;
-      background: #f5f5f5;
-      color: #333;
-    }
-    h1 { margin-bottom: 20px; font-size: 1.5em; }
-    .input-group {
-      margin-bottom: 15px;
-    }
-    label {
-      display: block;
-      margin-bottom: 5px;
-      font-weight: 500;
-    }
-    textarea, input[type="text"] {
-      width: 100%;
-      padding: 10px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      font-family: monospace;
-      font-size: 14px;
-    }
-    textarea {
-      height: 80px;
-      resize: vertical;
-    }
+    body { max-width: 1200px; }
+
+    /* Key inputs side by side */
     .key-inputs {
       display: flex;
       gap: 15px;
     }
-    .key-inputs .input-group {
-      flex: 1;
-    }
+    .key-inputs .input-group { flex: 1; }
+
+    /* Room input with # prefix */
     .room-input {
       display: flex;
       border: 1px solid #ccc;
@@ -66,25 +40,8 @@
       font-size: 14px;
       color: #333;
     }
-    button {
-      padding: 10px 16px;
-      background: #5b8fb9;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-    }
-    button:hover:not(:disabled) { background: #4a7a9e; }
-    button:disabled { background: #a0b8c8; cursor: not-allowed; }
-    button.running { background: #c45b5b; }
-    button.running:hover { background: #a84a4a; }
-    .inline-btn {
-      padding: 2px 8px;
-      font-size: 12px;
-      margin-left: 8px;
-      vertical-align: middle;
-    }
+
+    /* Brute force section */
     .brute-section {
       margin-top: 15px;
       border: 1px solid #ccc;
@@ -118,7 +75,12 @@
     }
     .brute-status:empty { display: none; }
     .brute-status .stat { margin: 3px 0; }
-    .brute-status .found { color: #080; font-weight: bold; font-size: 26px; animation: blink 1s ease-in-out infinite; }
+    .brute-status .found {
+      color: #080;
+      font-weight: bold;
+      font-size: 26px;
+      animation: blink 1s ease-in-out infinite;
+    }
     @keyframes blink {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.3; }
@@ -135,28 +97,8 @@
       gap: 12px;
       flex-wrap: wrap;
     }
-    .gpu-toggle-label {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 13px;
-      cursor: pointer;
-    }
-    .gpu-toggle-label input[type="checkbox"] {
-      cursor: pointer;
-    }
-    .gpu-toggle-label input[type="checkbox"]:disabled {
-      cursor: not-allowed;
-    }
-    .gpu-toggle-label input[type="checkbox"]:disabled + span {
-      color: #999;
-    }
-    .gpu-status {
-      font-size: 12px;
-      padding: 2px 8px;
-      border-radius: 3px;
-      background: #e8e8e8;
-    }
+
+    /* Resume input */
     .resume-row {
       display: flex;
       align-items: center;
@@ -177,6 +119,8 @@
       font-size: 13px;
       padding: 6px 8px;
     }
+
+    /* Output panel */
     .output {
       margin-top: 20px;
       background: white;
@@ -188,26 +132,41 @@
       font-size: 13px;
       overflow-y: auto;
     }
+
+    /* Two-column layout */
     .columns {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 20px;
     }
-    .column {
-      min-width: 0;
-    }
+    .column { min-width: 0; }
     @media (max-width: 800px) {
       .columns { grid-template-columns: 1fr; }
     }
-    .error { color: #c00; }
-    .success { color: #080; }
-    .warning { color: #a50; }
-    .muted { color: #666; }
-    .section { margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; }
-    .section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
-    .section.decrypted { padding: 10px; outline: green dashed 5px; }
-    .section-title { font-weight: bold; margin-bottom: 8px; }
-    .field { margin: 3px 0; word-break: break-all; }
+
+    /* Packet structure display */
+    .section {
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px solid #eee;
+    }
+    .section:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: none;
+    }
+    .section.decrypted {
+      padding: 10px;
+      outline: green dashed 5px;
+    }
+    .section-title {
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+    .field {
+      margin: 3px 0;
+      word-break: break-all;
+    }
     .field-name { color: #666; }
     .field-name[title] {
       cursor: help;
@@ -217,49 +176,14 @@
       display: block;
       margin-left: 20px;
     }
-    .bookmarklet-section {
-      margin-top: 20px;
-      padding: 12px 15px;
-      background: #e8f4e8;
-      border: 1px solid #b8d4b8;
-      border-radius: 4px;
-      font-size: 13px;
-    }
-    .bookmarklet-link {
-      display: inline-block;
-      padding: 4px 10px;
-      background: #5b8fb9;
-      color: white;
-      text-decoration: none;
-      border-radius: 3px;
-      font-weight: 500;
-      margin-right: 10px;
-    }
-    .bookmarklet-link:hover {
-      background: #4a7a9e;
-    }
-    .bookmarklet-desc {
-      color: #555;
-    }
-    .footer {
-      margin-top: 30px;
-      padding: 15px 0;
-      border-top: 1px solid #ccc;
-      font-size: 12px;
-      color: #666;
-      line-height: 1.5;
-    }
-    .footer a {
-      color: #555;
-    }
   </style>
 </head>
 <body>
   <h1>MeshCore Packet Knife</h1>
-  <p style="margin-top: -15px; margin-bottom: 20px; font-size: 13px; color: #666;">Finding room names in bulk? Try our <a href="./bulk.html">bulk interface</a>.</p>
+  <p class="subtitle">Finding room names in bulk? Try our <a href="./bulk.html">bulk interface</a>.</p>
 
   <div class="input-group">
-    <label for="packet">Raw Packet (hex) <button type="button" id="demo-btn-1" class="inline-btn">Load demo packet 1 (with key)</button> <button type="button" id="demo-btn-2" class="inline-btn">Load demo packet 2 (without key; for room discovery)</button></label>
+    <label for="packet">Raw Packet (hex) <button type="button" id="demo-btn-1" class="btn-inline">Load demo packet 1 (with key)</button> <button type="button" id="demo-btn-2" class="btn-inline">Load demo packet 2 (without key; for room discovery)</button></label>
     <textarea id="packet" placeholder="Paste hex packet data here (usually from serial or packet aggregator)..."></textarea>
   </div>
 
@@ -269,7 +193,7 @@
       <input type="text" id="key" placeholder="e.g. 9cd8fcf22a47333b591d96a2b848b73f">
     </div>
     <div class="input-group">
-      <label for="room">Room name (generates key) <button type="button" id="public-btn" class="inline-btn">Use public room key</button></label>
+      <label for="room">Room name (generates key) <button type="button" id="public-btn" class="btn-inline">Use public room key</button></label>
       <div class="room-input">
         <span class="room-prefix">#</span>
         <input type="text" id="room" placeholder="test">
@@ -285,26 +209,26 @@
       <p class="brute-desc">Search performance is affected by browser throttling when backgrounded; keep the window in the foreground.</p>
       <p class="brute-desc"><strong>MeshCore is still secure! Nothing is hacked or broken about MeshCore due to this demo. Hashtag rooms are not considered private; this merely demonstrates that reality. MeshCore has strong, modern, secure crypto for private messages and private rooms. Use them, and not hashtag rooms, for private communications, and you're just fine.</strong></p>
       <div class="brute-option-row">
-        <label class="gpu-toggle-label">
+        <label class="checkbox-row">
           <input type="checkbox" id="gpu-toggle" checked>
           <span>Use GPU</span>
         </label>
-        <span id="gpu-status" class="gpu-status"></span>
+        <span id="gpu-status" class="status-pill"></span>
       </div>
       <div class="brute-option-row">
-        <label class="gpu-toggle-label">
+        <label class="checkbox-row">
           <input type="checkbox" id="auto-tune-toggle" checked>
           <span>Dynamically find optimal dispatch size (disable if you get errors or instability)</span>
         </label>
       </div>
       <div class="brute-option-row">
-        <label class="gpu-toggle-label">
+        <label class="checkbox-row">
           <input type="checkbox" id="timestamp-filter" checked>
           <span>Ignore keys that result in a decrypted timestamp of >1 month ago</span>
         </label>
       </div>
       <div class="brute-option-row">
-        <label class="gpu-toggle-label">
+        <label class="checkbox-row">
           <input type="checkbox" id="unicode-filter" checked>
           <span>Ignore keys resulting in invalid UTF-8</span>
         </label>
@@ -326,12 +250,12 @@
 
   <div id="output" class="output" style="display: none;"></div>
 
-  <div class="bookmarklet-section">
-    <a class="bookmarklet-link" href="javascript:(function(){var p=prompt('Enter packet hex:');if(p&&/^[0-9a-fA-F]+$/.test(p.trim().replace(/\s+/g,''))){window.open('https://jkingsman.github.io/meshcore-packet-knife/?packet='+p.trim().replace(/\s+/g,''),'_blank')}})();">Packet Room Finder Popup</a>
-    <span class="bookmarklet-desc">Drag to your bookmarks bar. Prompts for a packet and opens it for room discovery.</span>
+  <div class="info-box">
+    <a class="btn" href="javascript:(function(){var p=prompt('Enter packet hex:');if(p&&/^[0-9a-fA-F]+$/.test(p.trim().replace(/\s+/g,''))){window.open('https://jkingsman.github.io/meshcore-packet-knife/?packet='+p.trim().replace(/\s+/g,''),'_blank')}})();">Packet Room Finder Popup</a>
+    <span class="muted">Drag to your bookmarks bar. Prompts for a packet and opens it for room discovery.</span>
     <br><br>
-    <a class="bookmarklet-link" href="javascript:(function(){var p=window.getSelection().toString().trim().replace(/\s+/g,'');if(!p){alert('No text selected. Highlight a packet hex string first.');return}if(!/^[0-9a-fA-F]+$/.test(p)){alert('Selected text is not valid hex.');return}window.open('https://jkingsman.github.io/meshcore-packet-knife/?packet='+p,'_blank')})();">Find Room from Selection</a>
-    <span class="bookmarklet-desc">Drag to your bookmarks bar. Highlight packet hex on any page, then click to discover room name.</span>
+    <a class="btn" href="javascript:(function(){var p=window.getSelection().toString().trim().replace(/\s+/g,'');if(!p){alert('No text selected. Highlight a packet hex string first.');return}if(!/^[0-9a-fA-F]+$/.test(p)){alert('Selected text is not valid hex.');return}window.open('https://jkingsman.github.io/meshcore-packet-knife/?packet='+p,'_blank')})();">Find Room from Selection</a>
+    <span class="muted">Drag to your bookmarks bar. Highlight packet hex on any page, then click to discover room name.</span>
   </div>
 
   <footer class="footer">

@@ -44,5 +44,5 @@ npx esbuild src/bulk-serial.ts \
   --external:child_process \
   --external:@serialport/*
 
-# Copy HTML and wordlist to dist
-cp index.html bulk.html bulk-serial.html words_alpha.txt dist/
+# Copy HTML, CSS, and wordlist to dist
+cp index.html bulk.html bulk-serial.html styles.css words_alpha.txt dist/

@@ -5,17 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Bulk room name discovery for MeshCore mesh networking packets from radio serial with GPU acceleration.">
   <title>MeshCore Bulk Room Finder (Serial)</title>
+  <link rel="stylesheet" href="./styles.css">
   <style>
-    * { box-sizing: border-box; }
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 20px;
-      background: #f5f5f5;
-      color: #333;
-    }
-    h1 { margin-bottom: 20px; font-size: 1.5em; }
+    body { max-width: 1400px; }
+
+    /* Serial controls section */
     .serial-section {
       display: flex;
       gap: 15px;
@@ -28,212 +22,18 @@
       gap: 10px;
       align-items: center;
     }
-    .connection-status {
-      padding: 6px 12px;
-      border-radius: 4px;
-      font-size: 13px;
-      font-weight: 500;
-    }
-    .connection-status.disconnected {
-      background: #f8d7da;
-      color: #721c24;
-    }
-    .connection-status.connecting {
-      background: #fff3cd;
-      color: #856404;
-    }
-    .connection-status.connected {
-      background: #d4edda;
-      color: #155724;
-    }
-    .input-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .input-row label {
-      font-size: 13px;
-      white-space: nowrap;
-    }
-    .input-row input[type="number"] {
-      width: 60px;
-      padding: 6px 8px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      font-size: 14px;
-    }
-    button {
-      padding: 10px 16px;
-      background: #5b8fb9;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-    }
-    button:hover:not(:disabled) { background: #4a7a9e; }
-    button:disabled { background: #a0b8c8; cursor: not-allowed; }
-    .status-bar {
-      display: flex;
-      gap: 20px;
-      align-items: center;
-      padding: 10px 15px;
-      background: #e8e8e8;
-      border-radius: 4px;
-      margin-bottom: 20px;
-      font-size: 13px;
-      flex-wrap: wrap;
-    }
-    .status-item {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
-    .status-label { color: #666; }
-    .status-value { font-weight: 500; font-family: monospace; }
-    .status-value.success { color: #080; }
-    .status-value.warning { color: #a50; }
-    .results-table {
-      width: 100%;
-      border-collapse: collapse;
-      background: white;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      overflow: hidden;
-    }
-    .results-table th,
-    .results-table td {
-      padding: 10px 12px;
-      text-align: left;
-      border-bottom: 1px solid #eee;
-      font-size: 13px;
-    }
-    .results-table th {
-      background: #f0f0f0;
-      font-weight: 500;
-      position: sticky;
-      top: 0;
-    }
-    .results-table tr:last-child td {
-      border-bottom: none;
-    }
-    .results-table .mono {
-      font-family: monospace;
-      word-break: break-all;
-    }
-    .results-table .status-found {
-      color: #080;
-      font-weight: 500;
-    }
-    .results-table .status-failed {
-      color: #a50;
-    }
-    .results-table .status-pending {
-      color: #666;
-    }
-    .results-table .status-processing {
-      color: #5b8fb9;
-      font-weight: 500;
-    }
-    .packet-preview {
-      max-width: 200px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .message-cell {
-      max-width: 400px;
-      word-break: break-word;
-    }
-    .empty-state {
-      text-align: center;
-      padding: 40px;
-      color: #666;
-    }
-    .gpu-status {
-      font-size: 12px;
-      padding: 2px 8px;
-      border-radius: 3px;
-      background: #e8e8e8;
-    }
-    .gpu-status.success { background: #d4edda; color: #155724; }
-    .gpu-status.warning { background: #fff3cd; color: #856404; }
-    .known-keys {
-      margin-top: 20px;
-      padding: 10px 15px;
-      background: #e8f4e8;
-      border: 1px solid #b8d4b8;
-      border-radius: 4px;
-      font-size: 13px;
-    }
-    .known-keys-title {
-      font-weight: 500;
-      margin-bottom: 8px;
-    }
-    .known-keys-list {
-      font-family: monospace;
-      font-size: 12px;
-    }
-    .known-key-item {
-      margin: 4px 0;
-    }
-    .filter-options {
-      margin-bottom: 15px;
-      padding: 10px 15px;
-      background: #fafafa;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-    }
-    .filter-option {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin: 6px 0;
-      font-size: 13px;
-    }
-    .filter-option input[type="checkbox"] {
-      cursor: pointer;
-    }
-    .action-btns {
-      margin-top: 8px;
-      display: flex;
-      gap: 8px;
-    }
-    .action-btn {
-      padding: 4px 10px;
-      font-size: 12px;
-      background: #5b8fb9;
-      color: white;
-      border: none;
-      border-radius: 3px;
-      cursor: pointer;
-    }
-    .action-btn:hover { background: #4a7a9e; }
-    .retry-btn { background: #5b8fb9; }
-    .skip-btn { background: #8b6b4a; }
-    .skip-btn:hover { background: #7a5d40; }
-    .packets-received {
+
+    /* Small status text */
+    .status-text {
       font-size: 12px;
       color: #666;
-    }
-    .last-packet-time {
-      font-size: 12px;
-      color: #666;
-    }
-    .serial-not-supported {
-      padding: 20px;
-      background: #f8d7da;
-      border: 1px solid #f5c6cb;
-      border-radius: 4px;
-      color: #721c24;
-      margin-bottom: 20px;
     }
   </style>
 </head>
 <body>
   <h1>MeshCore Bulk Room Finder (Serial)</h1>
 
-  <div id="serial-not-supported" class="serial-not-supported" style="display: none;">
+  <div id="serial-not-supported" class="alert-box" style="display: none;">
     Web Serial API is not supported in this browser. Please use Chrome or Edge.
   </div>
 
@@ -247,9 +47,9 @@
       <label for="max-length">Max room length:</label>
       <input type="number" id="max-length" value="6" min="1" max="20">
     </div>
-    <span id="gpu-status" class="gpu-status"></span>
-    <span id="packets-received" class="packets-received"></span>
-    <span id="last-packet-time" class="last-packet-time"></span>
+    <span id="gpu-status" class="status-pill"></span>
+    <span id="packets-received" class="status-text"></span>
+    <span id="last-packet-time" class="status-text"></span>
   </div>
 
   <div class="status-bar">
@@ -275,18 +75,18 @@
     </div>
   </div>
 
-  <div class="filter-options">
-    <label class="filter-option">
+  <div class="options-panel">
+    <label class="checkbox-row">
       <input type="checkbox" id="timestamp-filter" checked>
       <span>Ignore keys that result in a decrypted timestamp of >1 month ago</span>
     </label>
-    <label class="filter-option">
+    <label class="checkbox-row">
       <input type="checkbox" id="unicode-filter" checked>
       <span>Ignore keys resulting in invalid UTF-8</span>
     </label>
-    <div class="filter-option" style="flex-direction: column; align-items: flex-start; gap: 4px;">
+    <div class="checkbox-row" style="flex-direction: column; align-items: flex-start; gap: 4px;">
       <label for="ignore-rooms">Ignore messages from rooms (comma-separated):</label>
-      <input type="text" id="ignore-rooms" value="bot, bots, test, testing, [[public room]]" style="width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;">
+      <input type="text" id="ignore-rooms" value="bot, bots, test, testing, [[public room]]" style="width: 100%;">
     </div>
   </div>
 
@@ -307,8 +107,8 @@
     </tbody>
   </table>
 
-  <div id="known-keys" class="known-keys" style="display: none;">
-    <div class="known-keys-title">Known Keys (used for fast matching)</div>
+  <div id="known-keys" class="info-box" style="display: none;">
+    <div class="info-box-title">Known Keys (used for fast matching)</div>
     <div id="known-keys-list" class="known-keys-list"></div>
   </div>
 
