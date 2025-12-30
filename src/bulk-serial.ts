@@ -678,11 +678,6 @@ async function addPacket(packetHex: string, maxLength: number): Promise<void> {
     return;
   }
 
-  // Check for duplicates
-  if (seenPackets.has(cleanHex)) {
-    return;
-  }
-
   try {
     const decoded = await MeshCorePacketDecoder.decodeWithVerification(cleanHex, {});
     const payload = decoded.payload?.decoded as {
@@ -695,8 +690,13 @@ async function addPacket(packetHex: string, maxLength: number): Promise<void> {
       return;
     }
 
-    // Mark as seen
-    seenPackets.add(cleanHex);
+    // Check for duplicates based on ciphertext (same message via different relay paths)
+    if (seenPackets.has(payload.ciphertext)) {
+      return;
+    }
+
+    // Mark ciphertext as seen
+    seenPackets.add(payload.ciphertext);
     packetsReceived++;
     updatePacketsReceivedDisplay();
 
