@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Scan for MeshCore networks by iterating over radio frequency combinations.">
+  <title>MeshCore Network Finder</title>
+  <link rel="stylesheet" href="./styles.css">
+  <style>
+    body { max-width: 1000px; }
+
+    .serial-section {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 20px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .serial-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    /* Scan options */
+    .scan-options {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+
+    .scan-type-selection {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .scan-type-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 15px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .scan-type-option:hover {
+      border-color: #2196F3;
+      background: #f5f9ff;
+    }
+
+    .scan-type-option.selected {
+      border-color: #2196F3;
+      background: #e3f2fd;
+    }
+
+    .scan-type-option input[type="radio"] {
+      margin: 0;
+    }
+
+    .scan-type-label {
+      font-weight: 500;
+    }
+
+    .scan-type-count {
+      font-size: 12px;
+      color: #666;
+    }
+
+    /* Info box */
+    .info-box {
+      background: #f5f5f5;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 15px;
+      font-size: 13px;
+    }
+
+    .info-box h4 {
+      margin: 0 0 10px 0;
+      font-size: 14px;
+    }
+
+    .info-box ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .info-box li {
+      margin-bottom: 5px;
+    }
+
+    /* Scan config row */
+    .scan-config-row {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .config-field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .config-field label {
+      font-weight: 500;
+      font-size: 14px;
+    }
+
+    .config-field input {
+      width: 60px;
+    }
+
+    .config-field-wide {
+      flex: 1;
+      min-width: 300px;
+    }
+
+    .config-field-wide label {
+      white-space: nowrap;
+    }
+
+    .wide-input {
+      flex: 1;
+      width: auto !important;
+      min-width: 200px;
+    }
+
+    /* Custom scan config */
+    .custom-config {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 15px;
+      background: #f0f7ff;
+      border: 1px solid #bbdefb;
+      border-radius: 8px;
+      margin-bottom: 15px;
+    }
+
+    .custom-config-row {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .estimated-time {
+      font-size: 14px;
+      color: #666;
+      padding: 8px 12px;
+      background: #fff3e0;
+      border-radius: 4px;
+    }
+
+    /* Status bar */
+    .scan-status-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 15px;
+      padding: 15px;
+      background: #f8f8f8;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      align-items: center;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .status-label {
+      font-weight: 500;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .status-value {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .status-value.success { color: #2e7d32; }
+    .status-value.warning { color: #f57c00; }
+
+    /* Current config display */
+    .current-config {
+      font-family: monospace;
+      font-size: 13px;
+      background: #e8f5e9;
+      padding: 4px 10px;
+      border-radius: 4px;
+    }
+
+    /* Progress bar */
+    .progress-container {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .progress-bar {
+      height: 20px;
+      background: #e0e0e0;
+      border-radius: 10px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4caf50, #8bc34a);
+      transition: width 0.3s ease;
+      border-radius: 10px;
+    }
+
+    .progress-text {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    /* Results section */
+    .results-section {
+      margin-top: 20px;
+    }
+
+    .results-section h3 {
+      margin: 0 0 10px 0;
+    }
+
+    .found-networks {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .network-item {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      padding: 10px 15px;
+      background: #e8f5e9;
+      border-radius: 6px;
+      border-left: 4px solid #4caf50;
+    }
+
+    .network-config {
+      font-family: monospace;
+      font-weight: 500;
+    }
+
+    .network-packets {
+      font-size: 13px;
+      color: #666;
+    }
+
+    .network-time {
+      font-size: 12px;
+      color: #999;
+      margin-left: auto;
+    }
+
+    .no-networks {
+      padding: 20px;
+      text-align: center;
+      color: #999;
+      background: #f5f5f5;
+      border-radius: 8px;
+    }
+
+    /* Scan button */
+    #scan-btn {
+      padding: 10px 25px;
+      font-size: 15px;
+    }
+
+    #scan-btn.scanning {
+      background: #f44336;
+    }
+
+    #scan-btn.scanning:hover {
+      background: #d32f2f;
+    }
+
+    /* Recent packets section */
+    .recent-packets {
+      margin-top: 20px;
+    }
+
+    .recent-packets h3 {
+      margin: 0 0 10px 0;
+    }
+
+    .packet-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .packet-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    .packet-time {
+      font-family: monospace;
+      font-size: 12px;
+      color: #666;
+      white-space: nowrap;
+    }
+
+    .packet-hex {
+      font-family: monospace;
+      font-size: 11px;
+      color: #333;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .packet-link {
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .no-packets {
+      padding: 15px;
+      text-align: center;
+      color: #999;
+      background: #f5f5f5;
+      border-radius: 8px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <h1>MeshCore Network Finder</h1>
+  <p class="subtitle">Analyzing packets? Use our <a href="./index.html">single packet analyzer</a> or <a href="./bulk.html">bulk room finder</a>.<br>More serial tools: <a href="./radio-config.html">radio config</a>, <a href="./bulk-serial.html">GroupText room finder</a>, or <a href="./raw-packets.html">raw packets</a>.</p>
+
+  <div id="serial-not-supported" class="alert-box" style="display: none;">
+    Web Serial API is not supported in this browser. Please use Chrome or Edge.
+  </div>
+
+  <div class="serial-section">
+    <div class="serial-controls">
+      <button id="connect-btn" type="button">Connect</button>
+      <button id="disconnect-btn" type="button" disabled>Disconnect</button>
+      <span id="connection-status" class="connection-status disconnected">Disconnected</span>
+    </div>
+  </div>
+
+  <div class="scan-options">
+    <h3>Scan Type</h3>
+    <div class="scan-type-selection">
+      <label class="scan-type-option selected">
+        <input type="radio" name="scan-type" value="test" checked>
+        <div>
+          <div class="scan-type-label">Test Scan</div>
+          <div class="scan-type-count">12 combinations</div>
+        </div>
+      </label>
+      <label class="scan-type-option">
+        <input type="radio" name="scan-type" value="amer">
+        <div>
+          <div class="scan-type-label">Americas Scan</div>
+          <div class="scan-type-count">240 combinations</div>
+        </div>
+      </label>
+      <label class="scan-type-option">
+        <input type="radio" name="scan-type" value="global">
+        <div>
+          <div class="scan-type-label">Global Scan</div>
+          <div class="scan-type-count">720 combinations</div>
+        </div>
+      </label>
+      <label class="scan-type-option">
+        <input type="radio" name="scan-type" value="custom">
+        <div>
+          <div class="scan-type-label">Custom Scan</div>
+          <div class="scan-type-count" id="custom-combo-count">121 combinations</div>
+        </div>
+      </label>
+    </div>
+
+    <div class="custom-config" id="custom-config" style="display: none;">
+      <div class="custom-config-row">
+        <div class="config-field">
+          <label for="custom-freq-from">Frequency from:</label>
+          <input type="number" id="custom-freq-from" value="900" min="100" max="1000" step="0.001">
+          <span>MHz</span>
+        </div>
+        <div class="config-field">
+          <label for="custom-freq-to">to:</label>
+          <input type="number" id="custom-freq-to" value="930" min="100" max="1000" step="0.001">
+          <span>MHz</span>
+        </div>
+        <div class="config-field">
+          <label for="custom-freq-step">step:</label>
+          <input type="number" id="custom-freq-step" value="0.25" min="0.001" max="100" step="0.001">
+          <span>MHz</span>
+        </div>
+      </div>
+      <div class="custom-config-row">
+        <div class="config-field config-field-wide">
+          <label for="custom-bandwidths">Bandwidths (kHz):</label>
+          <input type="text" id="custom-bandwidths" value="7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250, 500" class="wide-input">
+        </div>
+      </div>
+      <div class="custom-config-row">
+        <div class="config-field config-field-wide">
+          <label for="custom-sfs">Spreading factors:</label>
+          <input type="text" id="custom-sfs" value="5, 6, 7, 8, 9, 10, 11, 12" class="wide-input">
+        </div>
+      </div>
+    </div>
+
+    <div class="info-box" id="scan-info">
+      <h4>Test Scan</h4>
+      <ul>
+        <li><strong>Frequencies:</strong> 910.525 MHz (USA/CAN), 927.875 MHz (SoCal)</li>
+        <li><strong>Bandwidths:</strong> 62.5, 125, 250 kHz</li>
+        <li><strong>Spreading Factors:</strong> 6, 7</li>
+      </ul>
+    </div>
+
+    <div class="scan-config-row">
+      <div class="config-field">
+        <label for="linger-time">Linger time per combo:</label>
+        <input type="number" id="linger-time" value="1" min="0.1" max="60" step="0.1">
+        <span>minutes</span>
+      </div>
+      <div class="estimated-time" id="estimated-time">
+        Estimated scan time: <strong>12 minutes</strong>
+      </div>
+    </div>
+
+    <div>
+      <button id="scan-btn" type="button" disabled>Start Scan</button>
+    </div>
+  </div>
+
+  <div class="scan-status-bar" id="scan-status-bar" style="display: none;">
+    <div class="status-item">
+      <span class="status-label">Running:</span>
+      <span id="time-running" class="status-value">0:00</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">Current:</span>
+      <span id="current-combo" class="current-config">-</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">Combo:</span>
+      <span id="combo-progress" class="status-value">0 / 12</span>
+    </div>
+    <div class="progress-container">
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+        <div class="progress-text" id="progress-text">0%</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="results-section">
+    <h3>Networks Found: <span id="networks-count">0</span></h3>
+    <div class="found-networks" id="found-networks">
+      <div class="no-networks">No networks found yet. Start a scan to search for MeshCore traffic.</div>
+    </div>
+  </div>
+
+  <div class="recent-packets">
+    <h3>Recent Packets</h3>
+    <div class="packet-list" id="packet-list">
+      <div class="no-packets">No packets received yet.</div>
+    </div>
+  </div>
+
+  <script src="./network-finder-bundle.js"></script>
+</body>
+</html>

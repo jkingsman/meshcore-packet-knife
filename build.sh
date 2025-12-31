@@ -78,5 +78,22 @@ npx esbuild src/raw-packets.ts \
   --external:child_process \
   --external:@serialport/*
 
+# Build network-finder bundle
+npx esbuild src/network-finder.ts \
+  --bundle \
+  --outfile=dist/network-finder-bundle.js \
+  --format=iife \
+  --platform=browser \
+  --target=es2020 \
+  --sourcemap \
+  --minify \
+  --external:net \
+  --external:stream \
+  --external:util \
+  --external:fs \
+  --external:events \
+  --external:child_process \
+  --external:@serialport/*
+
 # Copy HTML, CSS, and wordlist to dist
-cp index.html bulk.html bulk-serial.html radio-config.html raw-packets.html styles.css words_alpha.txt dist/
+cp index.html bulk.html bulk-serial.html radio-config.html raw-packets.html network-finder.html styles.css words_alpha.txt dist/
