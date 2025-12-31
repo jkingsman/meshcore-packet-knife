@@ -112,6 +112,8 @@ let wordlistLoaded = false;
 // Filter settings
 let useTimestampFilter = true;
 let useUnicodeFilter = true;
+let autoRetryEnabled = false;
+let autoRetryIntervalId: number | null = null;
 
 // Ignored rooms - maps channelHash to room name for quick lookup
 const ignoredRooms: Map<string, string> = new Map();
@@ -546,6 +548,36 @@ function skipAndContinue(id: number): void {
   updateRow(item);
   updateStatusBar();
   processQueue();
+}
+
+// Auto-retry check: if queue is empty and there are failed items, retry the lowest length one
+function checkAutoRetry(): void {
+  if (!autoRetryEnabled) {
+    return;
+  }
+
+  // Check if queue has any pending or processing items
+  const hasPendingWork = queue.some((q) => q.status === 'pending' || q.status === 'processing');
+  if (hasPendingWork) {
+    return;
+  }
+
+  // Find all failed items and get the one with the lowest testedUpToLength
+  const failedItems = queue.filter((q) => q.status === 'failed');
+  if (failedItems.length === 0) {
+    return;
+  }
+
+  // Sort by testedUpToLength to get the lowest
+  failedItems.sort((a, b) => (a.testedUpToLength || 0) - (b.testedUpToLength || 0));
+
+  // Pick a random one from those with the lowest length
+  const lowestLength = failedItems[0].testedUpToLength || 0;
+  const lowestLengthItems = failedItems.filter((q) => (q.testedUpToLength || 0) === lowestLength);
+  const randomItem = lowestLengthItems[Math.floor(Math.random() * lowestLengthItems.length)];
+
+  // Retry it
+  retryWithHigherLimit(randomItem.id);
 }
 
 // Try known keys on a packet
@@ -1050,6 +1082,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Update on change
     ignoreRoomsInput.addEventListener('input', () => {
       updateIgnoredRooms(ignoreRoomsInput.value);
+    });
+  }
+
+  // Auto-retry toggle
+  const autoRetryCheckbox = document.getElementById('auto-retry') as HTMLInputElement | null;
+  if (autoRetryCheckbox) {
+    autoRetryCheckbox.checked = autoRetryEnabled;
+    autoRetryCheckbox.addEventListener('change', () => {
+      autoRetryEnabled = autoRetryCheckbox.checked;
+      if (autoRetryEnabled && autoRetryIntervalId === null) {
+        // Start checking every 2 seconds
+        autoRetryIntervalId = window.setInterval(checkAutoRetry, 2000);
+        // Also check immediately
+        checkAutoRetry();
+      } else if (!autoRetryEnabled && autoRetryIntervalId !== null) {
+        clearInterval(autoRetryIntervalId);
+        autoRetryIntervalId = null;
+      }
     });
   }
 

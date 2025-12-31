@@ -90,6 +90,10 @@
       <input type="checkbox" id="unicode-filter" checked>
       <span>Ignore keys resulting in invalid UTF-8</span>
     </label>
+    <label class="checkbox-row">
+      <input type="checkbox" id="auto-retry">
+      <span>Auto-retry failed items at length+1 when queue is empty</span>
+    </label>
     <div class="checkbox-row" style="flex-direction: column; align-items: flex-start; gap: 4px;">
       <label for="ignore-rooms">Ignore messages from rooms (comma-separated):</label>
       <input type="text" id="ignore-rooms" value="bot, bots, test, testing, olympia, seattle, renton, [[public room]]" style="width: 100%;">
