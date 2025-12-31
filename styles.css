@@ -299,6 +299,21 @@ button.running:hover { background: #a84a4a; }
 
 .known-key-item {
   margin: 4px 0;
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.known-room-name {
+  font-weight: 600;
+  color: #1565c0;
+  min-width: 120px;
+}
+
+.known-room-key {
+  color: #666;
+  word-break: break-all;
 }
 
 /* Connection status badge */

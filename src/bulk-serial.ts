@@ -288,12 +288,59 @@ function updateKnownKeysDisplay(): void {
   }
   knownKeysEl.style.display = 'block';
   knownKeysListEl.innerHTML = Array.from(knownKeys.values())
-    .map(
-      (k) =>
-        `<div class="known-key-item">#${escapeHtml(k.roomName)} → ${k.key.substring(0, 16)}...</div>`,
-    )
+    .map((k) => {
+      // Don't add # prefix for public room
+      const displayName =
+        k.roomName === PUBLIC_ROOM_NAME ? k.roomName : `#${escapeHtml(k.roomName)}`;
+      return `<div class="known-key-item"><span class="known-room-name">${displayName}</span> <span class="known-room-key">${k.key}</span></div>`;
+    })
     .join('');
 }
+
+// Console function to add a room name directly (without cracking)
+// Usage: addRoomName('roomname') - without the leading #
+// Special case: addRoomName('[[public room]]') uses the precomputed public key
+function addRoomNameFromConsole(roomName: string): void {
+  if (!roomName || typeof roomName !== 'string') {
+    console.error('Usage: addRoomName("roomname") - provide room name without leading #');
+    return;
+  }
+
+  let cleanName: string;
+  let key: string;
+
+  // Handle public room special case
+  if (roomName === '[[public room]]' || roomName === PUBLIC_ROOM_NAME) {
+    cleanName = PUBLIC_ROOM_NAME;
+    key = PUBLIC_KEY;
+  } else {
+    // Remove leading # if accidentally included
+    cleanName = roomName.startsWith('#') ? roomName.slice(1) : roomName;
+    // Derive key from room name
+    key = deriveKeyFromRoomName('#' + cleanName);
+  }
+
+  const channelHash = getChannelHash(key);
+
+  // Check if already exists
+  const existing = knownKeys.get(channelHash);
+  if (existing) {
+    console.log(`Room #${cleanName} already exists with key ${key}`);
+    return;
+  }
+
+  // Add to known keys
+  addKnownKey(channelHash, cleanName, key);
+  console.log(`Added room #${cleanName} with key ${key} (channel hash: ${channelHash})`);
+}
+
+// Expose to window for console access
+declare global {
+  interface Window {
+    addRoomName: typeof addRoomNameFromConsole;
+  }
+}
+window.addRoomName = addRoomNameFromConsole;
 
 // Update status bar
 function updateStatusBar(): void {
