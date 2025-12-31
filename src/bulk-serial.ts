@@ -344,12 +344,77 @@ declare global {
 }
 window.addRoomName = addRoomNameFromConsole;
 
+// Get length for a found item (from roomName or testedUpToLength)
+function getFoundLength(item: QueueItem): number {
+  if (item.testedUpToLength) {
+    return item.testedUpToLength;
+  }
+  if (item.roomName) {
+    // For public room or dictionary finds, use the room name length
+    if (item.roomName === PUBLIC_ROOM_NAME) {
+      return 0; // Special case for public room
+    }
+    return item.roomName.length;
+  }
+  return 0;
+}
+
 // Update status bar
 function updateStatusBar(): void {
   queueCountEl.textContent = String(queue.filter((q) => q.status === 'pending').length);
-  foundCountEl.textContent = String(foundCount);
-  failedCountEl.textContent = String(failedCount);
+  filteredCountEl.textContent = String(filteredCount);
   currentRateEl.textContent = currentRate > 0 ? formatRate(currentRate) : '-';
+
+  // Update found/failed with breakdown
+  const foundItems = queue.filter((q) => q.status === 'found');
+  const failedItems = queue.filter((q) => q.status === 'failed');
+  const total = foundItems.length + failedItems.length;
+
+  // Build found breakdown
+  let foundText = String(foundCount);
+  if (total > 0 && foundItems.length > 0) {
+    const foundByLength: Map<number, number> = new Map();
+    for (const item of foundItems) {
+      const len = getFoundLength(item);
+      foundByLength.set(len, (foundByLength.get(len) || 0) + 1);
+    }
+    const details: string[] = [];
+    const sortedLengths = Array.from(foundByLength.keys()).sort((a, b) => a - b);
+    for (const len of sortedLengths) {
+      const count = foundByLength.get(len)!;
+      const pct = ((count / total) * 100).toFixed(0);
+      if (len === 0) {
+        details.push(`${pct}% dict`);
+      } else {
+        details.push(`${pct}% len ${len}`);
+      }
+    }
+    if (details.length > 0) {
+      foundText += ` (${details.join(', ')})`;
+    }
+  }
+  foundCountEl.textContent = foundText;
+
+  // Build failed breakdown
+  let failedText = String(failedCount);
+  if (total > 0 && failedItems.length > 0) {
+    const failedByLength: Map<number, number> = new Map();
+    for (const item of failedItems) {
+      const len = item.testedUpToLength || 0;
+      failedByLength.set(len, (failedByLength.get(len) || 0) + 1);
+    }
+    const details: string[] = [];
+    const sortedLengths = Array.from(failedByLength.keys()).sort((a, b) => a - b);
+    for (const len of sortedLengths) {
+      const count = failedByLength.get(len)!;
+      const pct = ((count / total) * 100).toFixed(0);
+      details.push(`${pct}% len ${len}`);
+    }
+    if (details.length > 0) {
+      failedText += ` (${details.join(', ')})`;
+    }
+  }
+  failedCountEl.textContent = failedText;
 }
 
 // Update packets received counter
