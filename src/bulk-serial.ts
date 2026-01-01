@@ -336,13 +336,52 @@ function addRoomNameFromConsole(roomName: string): void {
   console.log(`Added room #${cleanName} with key ${key} (channel hash: ${channelHash})`);
 }
 
+// Console function to remove a room name from known keys
+// Usage: removeRoomName('roomname') - without the leading #
+// Special case: removeRoomName('[[public room]]') removes the public room key
+function removeRoomNameFromConsole(roomName: string): void {
+  if (!roomName || typeof roomName !== 'string') {
+    console.error('Usage: removeRoomName("roomname") - provide room name without leading #');
+    return;
+  }
+
+  let cleanName: string;
+  let key: string;
+
+  // Handle public room special case
+  if (roomName === '[[public room]]' || roomName === PUBLIC_ROOM_NAME) {
+    cleanName = PUBLIC_ROOM_NAME;
+    key = PUBLIC_KEY;
+  } else {
+    // Remove leading # if accidentally included
+    cleanName = roomName.startsWith('#') ? roomName.slice(1) : roomName;
+    // Derive key from room name
+    key = deriveKeyFromRoomName('#' + cleanName);
+  }
+
+  const channelHash = getChannelHash(key);
+
+  // Check if it exists
+  const existing = knownKeys.get(channelHash);
+  if (!existing) {
+    console.log(`Room #${cleanName} not found in known keys`);
+    return;
+  }
+
+  // Remove from known keys
+  removeKnownKey(channelHash);
+  console.log(`Removed room #${cleanName} with key ${key} (channel hash: ${channelHash})`);
+}
+
 // Expose to window for console access
 declare global {
   interface Window {
     addRoomName: typeof addRoomNameFromConsole;
+    removeRoomName: typeof removeRoomNameFromConsole;
   }
 }
 window.addRoomName = addRoomNameFromConsole;
+window.removeRoomName = removeRoomNameFromConsole;
 
 // Get length for a found item (from roomName or testedUpToLength)
 function getFoundLength(item: QueueItem): number {
@@ -1022,7 +1061,7 @@ function setupSerialListeners(conn: typeof WebSerialConnection): void {
 
       // Only process GroupText packets for room discovery
       if (decoded.payloadType === PayloadType.GroupText) {
-        const maxLength = parseInt(maxLengthInput.value) || 6;
+        const maxLength = parseInt(maxLengthInput.value) || 7;
         await addPacket(hexData, maxLength);
       }
     } catch {
