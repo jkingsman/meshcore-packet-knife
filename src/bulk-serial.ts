@@ -616,8 +616,8 @@ function skipAndContinue(id: number): void {
 }
 
 // Auto-retry check: if queue is empty and there are failed items, retry the lowest length one
-// Max auto-retry length is 7 (won't automatically start length 8 cracking)
-const AUTO_RETRY_MAX_LENGTH = 7;
+// Max auto-retry length is 8 (won't automatically start length 9 cracking)
+const AUTO_RETRY_MAX_LENGTH = 8;
 
 function checkAutoRetry(): void {
   if (!autoRetryEnabled) {
