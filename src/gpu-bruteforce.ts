@@ -20,6 +20,25 @@ export class GpuBruteForce {
   private pipeline: GPUComputePipeline | null = null;
   private bindGroupLayout: GPUBindGroupLayout | null = null;
 
+  // Persistent buffers for reuse between batches
+  private paramsBuffer: GPUBuffer | null = null;
+  private matchCountBuffer: GPUBuffer | null = null;
+  private matchIndicesBuffer: GPUBuffer | null = null;
+  private ciphertextBuffer: GPUBuffer | null = null;
+  private ciphertextBufferSize: number = 0;
+
+  // Double-buffered staging buffers for overlapping GPU/CPU work
+  private matchCountReadBuffers: [GPUBuffer | null, GPUBuffer | null] = [null, null];
+  private matchIndicesReadBuffers: [GPUBuffer | null, GPUBuffer | null] = [null, null];
+  private currentReadBufferIndex: number = 0;
+
+  // Cached bind group (recreated only when ciphertext buffer changes)
+  private bindGroup: GPUBindGroup | null = null;
+  private bindGroupDirty: boolean = true;
+
+  // Reusable zero buffer for resetting match count
+  private static readonly ZERO_DATA = new Uint32Array([0]);
+
   // Shader for SHA256 computation
   private shaderCode = /* wgsl */ `
 // SHA256 round constants
@@ -55,10 +74,9 @@ struct Params {
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
-@group(0) @binding(1) var<storage, read_write> results: array<u32>;
-@group(0) @binding(2) var<storage, read_write> match_count: atomic<u32>;
-@group(0) @binding(3) var<storage, read_write> match_indices: array<u32>;
-@group(0) @binding(4) var<storage, read> ciphertext: array<u32>; // Ciphertext data
+@group(0) @binding(1) var<storage, read_write> match_count: atomic<u32>;
+@group(0) @binding(2) var<storage, read_write> match_indices: array<u32>;
+@group(0) @binding(3) var<storage, read> ciphertext: array<u32>; // Ciphertext data
 
 fn rotr(x: u32, n: u32) -> u32 {
   return (x >> n) | (x << (32u - n));
@@ -392,8 +410,8 @@ fn process_candidate(name_idx: u32) {
   }
 }
 
-// Each thread processes 4 candidates to amortize thread overhead
-const CANDIDATES_PER_THREAD: u32 = 4u;
+// Each thread processes 16 candidates to amortize thread overhead
+const CANDIDATES_PER_THREAD: u32 = 16u;
 
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -431,10 +449,38 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
           { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
           { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
           { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-          { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-          { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+          { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
         ],
       });
+
+      // Create persistent buffers
+      this.paramsBuffer = this.device.createBuffer({
+        size: 32, // 8 u32s
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+
+      this.matchCountBuffer = this.device.createBuffer({
+        size: 4,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+      });
+
+      this.matchIndicesBuffer = this.device.createBuffer({
+        size: 1024 * 4, // Max 1024 matches per batch
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      });
+
+      // Double-buffered staging buffers
+      for (let i = 0; i < 2; i++) {
+        this.matchCountReadBuffers[i] = this.device.createBuffer({
+          size: 4,
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        });
+
+        this.matchIndicesReadBuffers[i] = this.device.createBuffer({
+          size: 1024 * 4,
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        });
+      }
 
       // Create pipeline
       const shaderModule = this.device.createShaderModule({
@@ -482,9 +528,27 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     ciphertextHex?: string,
     targetMacHex?: string,
   ): Promise<number[]> {
-    if (!this.device || !this.pipeline || !this.bindGroupLayout) {
+    if (
+      !this.device ||
+      !this.pipeline ||
+      !this.bindGroupLayout ||
+      !this.paramsBuffer ||
+      !this.matchCountBuffer ||
+      !this.matchIndicesBuffer ||
+      !this.matchCountReadBuffers[0] ||
+      !this.matchCountReadBuffers[1] ||
+      !this.matchIndicesReadBuffers[0] ||
+      !this.matchIndicesReadBuffers[1]
+    ) {
       throw new Error('GPU not initialized');
     }
+
+    // Swap to alternate staging buffer set (double-buffering)
+    const readBufferIdx = this.currentReadBufferIndex;
+    this.currentReadBufferIndex = 1 - this.currentReadBufferIndex;
+
+    const matchCountReadBuffer = this.matchCountReadBuffers[readBufferIdx]!;
+    const matchIndicesReadBuffer = this.matchIndicesReadBuffers[readBufferIdx]!;
 
     // Parse ciphertext if provided
     const verifyMac = ciphertextHex && targetMacHex ? 1 : 0;
@@ -521,42 +585,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       ciphertextWords = new Uint32Array([0]); // Dummy
     }
 
-    // Create buffers
-    const paramsBuffer = this.device.createBuffer({
-      size: 32, // 8 u32s
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-
-    const resultsBuffer = this.device.createBuffer({
-      size: batchSize * 4,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    });
-
-    const matchCountBuffer = this.device.createBuffer({
-      size: 4,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
-    });
-
-    const matchIndicesBuffer = this.device.createBuffer({
-      size: 1024 * 4, // Max 1024 matches per batch
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    });
-
-    const ciphertextBuffer = this.device.createBuffer({
-      size: Math.max(ciphertextWords.length * 4, 4),
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-
-    // Staging buffers for reading results
-    const matchCountReadBuffer = this.device.createBuffer({
-      size: 4,
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-    });
-
-    const matchIndicesReadBuffer = this.device.createBuffer({
-      size: 1024 * 4,
-      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-    });
+    // Resize ciphertext buffer if needed (marks bind group as dirty)
+    const requiredCiphertextSize = Math.max(ciphertextWords.length * 4, 4);
+    if (!this.ciphertextBuffer || this.ciphertextBufferSize < requiredCiphertextSize) {
+      if (this.ciphertextBuffer) {
+        this.ciphertextBuffer.destroy();
+      }
+      this.ciphertextBuffer = this.device.createBuffer({
+        size: requiredCiphertextSize,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      this.ciphertextBufferSize = requiredCiphertextSize;
+      this.bindGroupDirty = true;
+    }
 
     // Write params
     const paramsData = new Uint32Array([
@@ -569,45 +610,52 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       ciphertextLenBits,
       verifyMac,
     ]);
-    this.device.queue.writeBuffer(paramsBuffer, 0, paramsData);
+    this.device.queue.writeBuffer(this.paramsBuffer, 0, paramsData);
 
     // Write ciphertext
-    this.device.queue.writeBuffer(ciphertextBuffer, 0, ciphertextWords);
+    this.device.queue.writeBuffer(this.ciphertextBuffer, 0, ciphertextWords);
 
-    // Reset match count
-    const zeroData = new Uint32Array([0]);
-    this.device.queue.writeBuffer(matchCountBuffer, 0, zeroData);
+    // Reset match count (reuse static zero buffer)
+    this.device.queue.writeBuffer(this.matchCountBuffer, 0, GpuBruteForce.ZERO_DATA);
 
-    // Create bind group
-    const bindGroup = this.device.createBindGroup({
-      layout: this.bindGroupLayout,
-      entries: [
-        { binding: 0, resource: { buffer: paramsBuffer } },
-        { binding: 1, resource: { buffer: resultsBuffer } },
-        { binding: 2, resource: { buffer: matchCountBuffer } },
-        { binding: 3, resource: { buffer: matchIndicesBuffer } },
-        { binding: 4, resource: { buffer: ciphertextBuffer } },
-      ],
-    });
+    // Recreate bind group only if needed
+    if (this.bindGroupDirty || !this.bindGroup) {
+      this.bindGroup = this.device.createBindGroup({
+        layout: this.bindGroupLayout,
+        entries: [
+          { binding: 0, resource: { buffer: this.paramsBuffer } },
+          { binding: 1, resource: { buffer: this.matchCountBuffer } },
+          { binding: 2, resource: { buffer: this.matchIndicesBuffer } },
+          { binding: 3, resource: { buffer: this.ciphertextBuffer } },
+        ],
+      });
+      this.bindGroupDirty = false;
+    }
 
     // Create command encoder
     const commandEncoder = this.device.createCommandEncoder();
     const passEncoder = commandEncoder.beginComputePass();
     passEncoder.setPipeline(this.pipeline);
-    passEncoder.setBindGroup(0, bindGroup);
-    // Each workgroup has 256 threads, each processing 4 candidates
-    const CANDIDATES_PER_THREAD = 4;
+    passEncoder.setBindGroup(0, this.bindGroup);
+    // Each workgroup has 256 threads, each processing 16 candidates
+    const CANDIDATES_PER_THREAD = 16;
     passEncoder.dispatchWorkgroups(Math.ceil(batchSize / (256 * CANDIDATES_PER_THREAD)));
     passEncoder.end();
 
-    // Copy results to staging buffers
-    commandEncoder.copyBufferToBuffer(matchCountBuffer, 0, matchCountReadBuffer, 0, 4);
-    commandEncoder.copyBufferToBuffer(matchIndicesBuffer, 0, matchIndicesReadBuffer, 0, 1024 * 4);
+    // Copy results to current staging buffers
+    commandEncoder.copyBufferToBuffer(this.matchCountBuffer, 0, matchCountReadBuffer, 0, 4);
+    commandEncoder.copyBufferToBuffer(
+      this.matchIndicesBuffer,
+      0,
+      matchIndicesReadBuffer,
+      0,
+      1024 * 4,
+    );
 
     // Submit
     this.device.queue.submit([commandEncoder.finish()]);
 
-    // Read results
+    // Read results from current staging buffers
     await matchCountReadBuffer.mapAsync(GPUMapMode.READ);
     const matchCount = new Uint32Array(matchCountReadBuffer.getMappedRange())[0];
     matchCountReadBuffer.unmap();
@@ -622,19 +670,33 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       matchIndicesReadBuffer.unmap();
     }
 
-    // Cleanup
-    paramsBuffer.destroy();
-    resultsBuffer.destroy();
-    matchCountBuffer.destroy();
-    matchIndicesBuffer.destroy();
-    ciphertextBuffer.destroy();
-    matchCountReadBuffer.destroy();
-    matchIndicesReadBuffer.destroy();
-
     return matches;
   }
 
   destroy(): void {
+    // Clean up persistent buffers
+    this.paramsBuffer?.destroy();
+    this.matchCountBuffer?.destroy();
+    this.matchIndicesBuffer?.destroy();
+    this.ciphertextBuffer?.destroy();
+
+    // Clean up double-buffered staging buffers
+    this.matchCountReadBuffers[0]?.destroy();
+    this.matchCountReadBuffers[1]?.destroy();
+    this.matchIndicesReadBuffers[0]?.destroy();
+    this.matchIndicesReadBuffers[1]?.destroy();
+
+    this.paramsBuffer = null;
+    this.matchCountBuffer = null;
+    this.matchIndicesBuffer = null;
+    this.ciphertextBuffer = null;
+    this.ciphertextBufferSize = 0;
+    this.matchCountReadBuffers = [null, null];
+    this.matchIndicesReadBuffers = [null, null];
+    this.currentReadBufferIndex = 0;
+    this.bindGroup = null;
+    this.bindGroupDirty = true;
+
     if (this.device) {
       this.device.destroy();
       this.device = null;

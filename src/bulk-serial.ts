@@ -616,6 +616,9 @@ function skipAndContinue(id: number): void {
 }
 
 // Auto-retry check: if queue is empty and there are failed items, retry the lowest length one
+// Max auto-retry length is 7 (won't automatically start length 8 cracking)
+const AUTO_RETRY_MAX_LENGTH = 7;
+
 function checkAutoRetry(): void {
   if (!autoRetryEnabled) {
     return;
@@ -638,6 +641,12 @@ function checkAutoRetry(): void {
 
   // Pick a random one from those with the lowest length
   const lowestLength = failedItems[0].testedUpToLength || 0;
+
+  // Don't auto-retry if we've already reached the max length
+  if (lowestLength >= AUTO_RETRY_MAX_LENGTH) {
+    return;
+  }
+
   const lowestLengthItems = failedItems.filter((q) => (q.testedUpToLength || 0) === lowestLength);
   const randomItem = lowestLengthItems[Math.floor(Math.random() * lowestLengthItems.length)];
 
