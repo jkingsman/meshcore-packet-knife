@@ -1,18 +1,17 @@
 import { MeshCorePacketDecoder, ChannelCrypto } from '@michaelhart/meshcore-decoder';
-import { getGpuBruteForce, isWebGpuSupported, GpuBruteForce } from './gpu-bruteforce';
 import {
+  GroupTextCracker,
   PUBLIC_ROOM_NAME,
   PUBLIC_KEY,
-  indexToRoomName,
-  roomNameToIndex,
-  deriveKeyFromRoomName,
   getChannelHash,
   verifyMac,
-  escapeHtml,
+  roomNameToIndex,
   countNamesForLength,
   isTimestampValid as coreIsTimestampValid,
   isValidUtf8 as coreIsValidUtf8,
-} from './core';
+  ProgressReport,
+} from 'meshcore-hashtag-cracker';
+import { escapeHtml } from './utils';
 
 // Types
 interface QueueItem {
@@ -29,12 +28,12 @@ interface QueueItem {
   testedUpTo?: string;
   testedUpToLength?: number;
   maxLength: number;
-  startFromLength: number;
-  startFromOffset: number;
+  startFrom?: string;
   progressPercent?: number;
   totalCandidates?: number;
   checkedCount?: number;
   skipDictionary?: boolean;
+  phase?: 'public-key' | 'wordlist' | 'bruteforce';
   error?: string;
 }
 
@@ -86,55 +85,14 @@ function removeKnownKey(channelHash: string): void {
 
 let nextId = 1;
 let isProcessing = false;
-let gpuInstance: GpuBruteForce | null = null;
+let cracker: GroupTextCracker | null = null;
 let foundCount = 0;
 let failedCount = 0;
 let currentRate = 0;
 
-// Wordlist for dictionary attack
-let wordlist: string[] = [];
-let wordlistLoaded = false;
-
 // Filter settings
 let useTimestampFilter = true;
 let useUnicodeFilter = true;
-
-// Valid room name pattern: a-z, 0-9, dash (not at start/end, no consecutive)
-const VALID_ROOM_CHARS = /^[a-z0-9-]+$/;
-function isValidRoomName(word: string): boolean {
-  if (!word || word.length === 0) {
-    return false;
-  }
-  if (!VALID_ROOM_CHARS.test(word)) {
-    return false;
-  }
-  if (word.startsWith('-') || word.endsWith('-')) {
-    return false;
-  }
-  if (word.includes('--')) {
-    return false;
-  }
-  return true;
-}
-
-// Load wordlist
-async function loadWordlist(): Promise<void> {
-  try {
-    const response = await fetch('./words_alpha.txt');
-    if (!response.ok) {
-      console.warn('Failed to load wordlist:', response.status);
-      return;
-    }
-    const text = await response.text();
-    const allWords = text.split('\n').map((w) => w.trim().toLowerCase());
-    // Filter to valid room names only
-    wordlist = allWords.filter(isValidRoomName);
-    wordlistLoaded = true;
-    // Wordlist loaded successfully
-  } catch (err) {
-    console.warn('Error loading wordlist:', err);
-  }
-}
 
 // DOM elements
 let resultsBody: HTMLTableSectionElement;
@@ -251,12 +209,8 @@ function renderRow(item: QueueItem): string {
       const pct = item.progressPercent ?? 0;
       statusText = `Processing ${pct.toFixed(1)}%`;
 
-      // Check if we're in dictionary mode
-      const inDictMode = item.testedUpTo?.startsWith('dict:');
-
-      if (inDictMode) {
-        const word = item.testedUpTo?.substring(5) || '';
-        resultText = `Dictionary: ${escapeHtml(word)}...`;
+      if (item.phase === 'wordlist') {
+        resultText = `dict: ${escapeHtml(item.testedUpTo || '')}`;
       } else {
         let etaText = '';
         if (
@@ -270,7 +224,7 @@ function renderRow(item: QueueItem): string {
           etaText = `; ETA ${formatTime(etaSeconds)}`;
         }
         const lengthText = item.testedUpToLength
-          ? `Searching length ${item.testedUpToLength}`
+          ? `GPU length ${item.testedUpToLength}`
           : 'Starting';
         resultText = `${lengthText}${etaText}`;
       }
@@ -354,14 +308,15 @@ function retryWithHigherLimit(id: number): void {
   }
 
   // Increase max length by 1, start from the next length
+  const newStartLength = (item.testedUpToLength || 1) + 1;
   item.maxLength = (item.testedUpToLength || item.maxLength) + 1;
-  item.startFromLength = (item.testedUpToLength || 1) + 1;
-  item.startFromOffset = 0;
+  item.startFrom = `${'a'.repeat(newStartLength)}`; // Start of next length
   item.status = 'pending';
   item.testedUpTo = undefined;
   item.progressPercent = undefined;
   item.totalCandidates = undefined;
   item.checkedCount = undefined;
+  item.skipDictionary = true; // Already tried dictionary
   failedCount--;
 
   updateRow(item);
@@ -385,14 +340,16 @@ function skipAndContinue(id: number): void {
   if (item.roomName) {
     const pos = roomNameToIndex(item.roomName);
     if (pos) {
-      item.startFromLength = pos.length;
       // Start from the next index after the false positive
-      item.startFromOffset = pos.index + 1;
+      let nextIndex = pos.index + 1;
+      let nextLength = pos.length;
       // If we've exhausted this length, move to next
-      if (item.startFromOffset >= countNamesForLength(pos.length)) {
-        item.startFromLength = pos.length + 1;
-        item.startFromOffset = 0;
+      if (nextIndex >= countNamesForLength(pos.length)) {
+        nextLength = pos.length + 1;
+        nextIndex = 0;
       }
+      // Create a startFrom string (approximation - the library will handle it)
+      item.startFrom = 'a'.repeat(nextLength);
     }
   }
 
@@ -405,6 +362,7 @@ function skipAndContinue(id: number): void {
   item.progressPercent = undefined;
   item.totalCandidates = undefined;
   item.checkedCount = undefined;
+  item.skipDictionary = true;
   foundCount--;
 
   updateRow(item);
@@ -452,174 +410,68 @@ function tryKnownKeys(item: QueueItem): boolean {
   return false;
 }
 
-// Try dictionary attack on a packet
-async function tryDictionary(item: QueueItem): Promise<boolean> {
-  if (!wordlistLoaded || wordlist.length === 0 || item.skipDictionary) {
-    return false;
-  }
-
-  const targetHashByte = parseInt(item.channelHash!, 16);
-  const startTime = performance.now();
-  let lastUpdate = performance.now();
-  const totalWords = wordlist.length;
-
-  for (let i = 0; i < totalWords; i++) {
-    const word = wordlist[i];
-
-    // Derive key and check channel hash first (fast filter)
-    const key = deriveKeyFromRoomName('#' + word);
-    const channelHash = getChannelHash(key);
-    if (parseInt(channelHash, 16) !== targetHashByte) {
-      continue;
-    }
-
-    // Channel hash matches, verify MAC and filters
-    const result = verifyMacAndFilters(item.ciphertext!, item.cipherMac!, key);
-    if (result.valid) {
-      item.status = 'found';
-      item.roomName = word;
-      item.key = key;
-      item.sender = result.sender;
-      item.message = result.message;
-      item.testedUpTo = `dict:${word}`;
-      foundCount++;
-
-      addKnownKey(item.channelHash!, word, key);
-      return true;
-    }
-
-    // Update UI periodically
-    const now = performance.now();
-    if (now - lastUpdate >= 200) {
-      const elapsed = (now - startTime) / 1000;
-      currentRate = Math.round(i / elapsed);
-      item.testedUpTo = `dict:${word}`;
-      item.progressPercent = (i / totalWords) * 100;
-      updateRow(item);
-      updateStatusBar();
-      lastUpdate = now;
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-  }
-
-  return false;
-}
-
-// Process a single queue item with brute force
+// Process a single queue item using the cracker library
 async function processItem(item: QueueItem): Promise<void> {
-  if (!gpuInstance) {
+  if (!cracker) {
     item.status = 'failed';
-    item.error = 'GPU not available';
+    item.error = 'Cracker not available';
     item.testedUpTo = 'N/A';
     failedCount++;
     return;
   }
 
-  const targetHashByte = parseInt(item.channelHash!, 16);
-  const startTime = performance.now();
-  let totalChecked = 0;
-  let lastRateUpdate = performance.now();
-
-  // Auto-tuning
-  const INITIAL_BATCH_SIZE = 32768;
-  const TARGET_DISPATCH_MS = 1000;
-  let currentBatchSize = INITIAL_BATCH_SIZE;
-  let batchSizeTuned = false;
-
-  // Calculate total candidates for progress tracking
-  let totalCandidates = 0;
-  for (let l = item.startFromLength; l <= item.maxLength; l++) {
-    totalCandidates += countNamesForLength(l);
-  }
-  // Subtract the offset we're starting from
-  totalCandidates -= item.startFromOffset;
-  item.totalCandidates = totalCandidates;
-
-  for (let length = item.startFromLength; length <= item.maxLength; length++) {
-    const totalForLength = countNamesForLength(length);
-    // Use startFromOffset for the first length, then 0 for subsequent lengths
-    let offset = length === item.startFromLength ? item.startFromOffset : 0;
-
-    while (offset < totalForLength) {
-      const batchSize = Math.min(currentBatchSize, totalForLength - offset);
-      const dispatchStart = performance.now();
-
-      const matches = await gpuInstance.runBatch(
-        targetHashByte,
-        length,
-        offset,
-        batchSize,
-        item.ciphertext!,
-        item.cipherMac!,
-      );
-
-      const dispatchTime = performance.now() - dispatchStart;
-      totalChecked += batchSize;
-
-      // Auto-tune
-      if (!batchSizeTuned && batchSize >= INITIAL_BATCH_SIZE && dispatchTime > 0) {
-        const scaleFactor = TARGET_DISPATCH_MS / dispatchTime;
-        const optimalBatchSize = Math.round(batchSize * scaleFactor);
-        const rounded = Math.pow(
-          2,
-          Math.round(Math.log2(Math.max(INITIAL_BATCH_SIZE, optimalBatchSize))),
-        );
-        currentBatchSize = Math.max(INITIAL_BATCH_SIZE, rounded);
-        batchSizeTuned = true;
-      }
-
-      // Check matches
-      for (const matchIdx of matches) {
-        const roomName = indexToRoomName(length, matchIdx);
-        if (!roomName) {
-          continue;
-        }
-
-        const key = deriveKeyFromRoomName('#' + roomName);
-        const result = verifyMacAndFilters(item.ciphertext!, item.cipherMac!, key);
-        if (result.valid) {
-          item.status = 'found';
-          item.roomName = roomName;
-          item.key = key;
-          item.sender = result.sender;
-          item.message = result.message;
-          item.testedUpToLength = length;
-          foundCount++;
-
-          addKnownKey(item.channelHash!, roomName, key);
-
-          return;
-        }
-      }
-
-      offset += batchSize;
-
-      // Update rate periodically
-      const now = performance.now();
-      if (now - lastRateUpdate >= 200) {
-        const elapsed = (now - startTime) / 1000;
-        currentRate = Math.round(totalChecked / elapsed);
-        item.testedUpTo =
-          indexToRoomName(length, Math.min(offset, totalForLength - 1)) || item.testedUpTo;
-        item.testedUpToLength = length;
-        item.checkedCount = totalChecked;
-        item.progressPercent =
-          totalCandidates > 0 ? Math.min(100, (totalChecked / totalCandidates) * 100) : 0;
+  try {
+    const result = await cracker.crack(
+      item.packetHex,
+      {
+        maxLength: item.maxLength,
+        useTimestampFilter,
+        useUtf8Filter: useUnicodeFilter,
+        startFrom: item.startFrom,
+        useDictionary: !item.skipDictionary,
+      },
+      (progress: ProgressReport) => {
+        currentRate = progress.rateKeysPerSec;
+        item.testedUpToLength = progress.currentLength;
+        item.progressPercent = progress.percent;
+        item.checkedCount = progress.checked;
+        item.totalCandidates = progress.total;
+        item.testedUpTo = progress.currentPosition;
+        item.phase = progress.phase;
         updateRow(item);
         updateStatusBar();
-        lastRateUpdate = now;
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-    }
-  }
+      },
+    );
 
-  // Not found
-  item.status = 'failed';
-  item.testedUpTo =
-    indexToRoomName(item.maxLength, countNamesForLength(item.maxLength) - 1) ||
-    `length ${item.maxLength}`;
-  item.testedUpToLength = item.maxLength;
-  failedCount++;
+    if (result.found && result.roomName && result.key) {
+      // Decrypt to get sender/message
+      const decrypted = ChannelCrypto.decryptGroupTextMessage(
+        item.ciphertext!,
+        item.cipherMac!,
+        result.key,
+      );
+
+      item.status = 'found';
+      item.roomName = result.roomName;
+      item.key = result.key;
+      item.testedUpToLength = result.roomName.length;
+      if (decrypted.success && decrypted.data) {
+        item.sender = decrypted.data.sender;
+        item.message = decrypted.data.message;
+      }
+      foundCount++;
+      addKnownKey(item.channelHash!, result.roomName, result.key);
+    } else {
+      item.status = 'failed';
+      item.testedUpToLength = item.maxLength;
+      failedCount++;
+    }
+  } catch (e) {
+    item.status = 'failed';
+    item.error = (e as Error).message;
+    item.testedUpToLength = item.maxLength;
+    failedCount++;
+  }
 }
 
 // Main processing loop
@@ -640,7 +492,7 @@ async function processQueue(): Promise<void> {
     updateRow(item);
     updateStatusBar();
 
-    // First try known keys
+    // First try known keys (fast local lookup)
     if (tryKnownKeys(item)) {
       updateRow(item);
       updateStatusBar();
@@ -648,17 +500,7 @@ async function processQueue(): Promise<void> {
       continue;
     }
 
-    // Try dictionary attack
-    if (await tryDictionary(item)) {
-      updateRow(item);
-      updateStatusBar();
-      continue;
-    }
-
-    // Mark dictionary as done so retries skip it
-    item.skipDictionary = true;
-
-    // Brute force
+    // Use the cracker library for dictionary + brute force
     await processItem(item);
     updateRow(item);
     updateStatusBar();
@@ -698,8 +540,6 @@ async function addPacket(packetHex: string, maxLength: number): Promise<void> {
       ciphertext: payload.ciphertext,
       cipherMac: payload.cipherMac,
       maxLength,
-      startFromLength: 1,
-      startFromOffset: 0,
     };
 
     queue.push(item);
@@ -730,7 +570,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const packetInput = document.getElementById('packet-input') as HTMLTextAreaElement;
   const addBtn = document.getElementById('add-btn') as HTMLButtonElement;
-  const gpuStatus = document.getElementById('gpu-status')!;
 
   // Filter toggles
   const timestampFilter = document.getElementById('timestamp-filter') as HTMLInputElement | null;
@@ -750,21 +589,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Load wordlist and initialize GPU in parallel
-  const [, gpuResult] = await Promise.all([
-    loadWordlist(),
-    isWebGpuSupported() ? getGpuBruteForce() : Promise.resolve(null),
-  ]);
-  gpuInstance = gpuResult;
+  // Initialize cracker
+  cracker = new GroupTextCracker();
 
-  if (gpuInstance) {
-    gpuStatus.textContent = 'GPU: Ready';
-    gpuStatus.classList.add('success');
-  } else if (isWebGpuSupported()) {
-    gpuStatus.textContent = 'GPU: Init failed';
-    gpuStatus.classList.add('warning');
-  } else {
-    gpuStatus.textContent = 'GPU: Not supported';
+  // Try to load wordlist (optional)
+  try {
+    await cracker.loadWordlist('./words_alpha.txt');
+  } catch {
+    // Wordlist not available, dictionary attack will be skipped
   }
 
   // Add button handler

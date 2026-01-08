@@ -3,43 +3,28 @@ import {
   Utils,
   DecodedPacket,
   PacketStructure,
-  ChannelCrypto,
   GroupTextPayload,
   PayloadData,
 } from '@michaelhart/meshcore-decoder';
-import { getGpuBruteForce, isWebGpuSupported, GpuBruteForce } from './gpu-bruteforce';
 import {
+  GroupTextCracker,
+  deriveKeyFromRoomName,
   PUBLIC_ROOM_NAME,
   PUBLIC_KEY,
-  roomNameToIndex,
-  indexToRoomName,
-  deriveKeyFromRoomName,
-  getChannelHash,
-  verifyMac,
-  escapeHtml,
-  isTimestampValid as coreIsTimestampValid,
-  isValidUtf8 as coreIsValidUtf8,
-  RoomNameGenerator,
-} from './core';
+  ProgressReport,
+} from 'meshcore-hashtag-cracker';
+import { escapeHtml } from './utils';
+
+// Cracker instance
+let cracker: GroupTextCracker | null = null;
 
 // Brute force state
 let bruteForceRunning = false;
-let bruteForceAbort = false;
-let savedTargetChannelHash = '';
-let savedCiphertext = '';
-let savedCipherMac = '';
+let savedPacketHex = '';
 
-// GPU state
-let gpuInstance: GpuBruteForce | null = null;
-let gpuAvailable = false;
-let useGpu = true; // User preference
-let useAutoTune = true; // Dynamically find optimal batch size
-let useTimestampFilter = true; // Filter by timestamp (last month)
-let useUnicodeFilter = true; // Filter invalid unicode characters
-
-// Fixed batch size when auto-tune is disabled
-const FIXED_BATCH_SIZE = 262144; // 256K - conservative default
-const UPDATE_INTERVAL = 100; // ms - 10 updates per second
+// Filter options
+let useTimestampFilter = true;
+let useUnicodeFilter = true;
 
 // Formatting helpers
 function formatTime(seconds: number): string {
@@ -71,20 +56,6 @@ function formatRate(rate: number): string {
   return `${rate} keys/s`;
 }
 
-function formatBatchSize(size: number): string {
-  if (size >= 1048576) {
-    return `${(size / 1048576).toFixed(1)}M`;
-  }
-  return `${(size / 1024).toFixed(0)}K`;
-}
-
-function getBatchInfo(currentBatchSize: number, batchSizeTuned: boolean): string {
-  if (!useAutoTune) {
-    return ` | Batch: ${formatBatchSize(FIXED_BATCH_SIZE)} (fixed)`;
-  }
-  return batchSizeTuned ? ` | Batch: ${formatBatchSize(currentBatchSize)}` : ' | Tuning...';
-}
-
 // Brute force UI state helpers
 function getBruteForceElements() {
   return {
@@ -97,7 +68,6 @@ function getBruteForceElements() {
 function startBruteForceUI() {
   const { bruteBtn, skipBtn } = getBruteForceElements();
   bruteForceRunning = true;
-  bruteForceAbort = false;
   bruteBtn.disabled = false;
   bruteBtn.textContent = 'Stop';
   bruteBtn.classList.add('running');
@@ -110,69 +80,6 @@ function finishBruteForceUI(showSkip: boolean) {
   bruteBtn.textContent = 'Start';
   bruteBtn.classList.remove('running');
   skipBtn.style.display = showSkip ? 'inline-block' : 'none';
-}
-
-// Check if public key matches (returns result or null to continue)
-function checkPublicKey(
-  targetChannelHash: string,
-  ciphertext: string,
-  cipherMac: string,
-  gpuMode: boolean,
-): { found: true; roomName: string; key: string } | null {
-  const { statusEl } = getBruteForceElements();
-  const publicChannelHash = getChannelHash(PUBLIC_KEY);
-  if (publicChannelHash === targetChannelHash) {
-    if (verifyMac(ciphertext, cipherMac, PUBLIC_KEY)) {
-      const modeInfo = gpuMode ? '<div class="stat">Mode: GPU accelerated</div>' : '';
-      statusEl.innerHTML = `<div class="stat found">Found: ${PUBLIC_ROOM_NAME}</div>${modeInfo}`;
-      finishBruteForceUI(true);
-      saveResumePosition('a');
-      return { found: true, roomName: PUBLIC_ROOM_NAME, key: PUBLIC_KEY };
-    }
-  }
-  return null;
-}
-
-// Wrapper functions that respect filter toggle state
-function isTimestampValid(timestamp: number): boolean {
-  if (!useTimestampFilter) {
-    return true;
-  }
-  return coreIsTimestampValid(timestamp);
-}
-
-function isValidUtf8(text: string): boolean {
-  if (!useUnicodeFilter) {
-    return true;
-  }
-  return coreIsValidUtf8(text);
-}
-
-// Verify MAC and optionally check timestamp and unicode
-function verifyMacAndTimestamp(ciphertext: string, cipherMac: string, keyHex: string): boolean {
-  if (!verifyMac(ciphertext, cipherMac, keyHex)) {
-    return false;
-  }
-
-  if (!useTimestampFilter && !useUnicodeFilter) {
-    return true;
-  }
-
-  // Decrypt and check filters
-  const result = ChannelCrypto.decryptGroupTextMessage(ciphertext, cipherMac, keyHex);
-  if (!result.success || !result.data) {
-    return false;
-  }
-
-  if (useTimestampFilter && !isTimestampValid(result.data.timestamp)) {
-    return false;
-  }
-
-  if (useUnicodeFilter && !isValidUtf8(result.data.message)) {
-    return false;
-  }
-
-  return true;
 }
 
 // Get resume input element
@@ -188,274 +95,66 @@ function saveResumePosition(roomName: string) {
   }
 }
 
-async function bruteForce(
-  targetChannelHash: string,
-  ciphertext: string,
-  cipherMac: string,
+// Run cracking with the library
+async function runCracker(
+  packetHex: string,
   startFrom?: string,
 ): Promise<{ found: boolean; roomName?: string; key?: string }> {
-  const gen = new RoomNameGenerator();
-  const { statusEl } = getBruteForceElements();
-
-  // If starting from a specific position, advance generator
-  if (startFrom) {
-    const pos = roomNameToIndex(startFrom);
-    if (pos) {
-      gen.skipTo(pos.length, pos.index);
-    }
-  }
-
-  let count = 0;
-  const startTime = performance.now();
-  let lastUpdate = performance.now();
-  const BATCH_SIZE = 10000;
-
-  // Save for potential resume
-  savedTargetChannelHash = targetChannelHash;
-  savedCiphertext = ciphertext;
-  savedCipherMac = cipherMac;
-
-  startBruteForceUI();
-
-  // Check public key first (only on fresh start)
-  if (!startFrom) {
-    const publicResult = checkPublicKey(targetChannelHash, ciphertext, cipherMac, false);
-    if (publicResult) {
-      return publicResult;
-    }
-  }
-
-  return new Promise((resolve) => {
-    function processBatch() {
-      if (bruteForceAbort) {
-        saveResumePosition(gen.current());
-        finish(false);
-        return;
-      }
-
-      for (let i = 0; i < BATCH_SIZE; i++) {
-        const roomName = gen.current();
-        const key = deriveKeyFromRoomName('#' + roomName);
-        const channelHash = getChannelHash(key);
-
-        count++;
-
-        if (channelHash === targetChannelHash) {
-          if (verifyMacAndTimestamp(ciphertext, cipherMac, key)) {
-            updateStatus(roomName, true);
-            gen.nextValid();
-            saveResumePosition(gen.current());
-            finishBruteForceUI(true);
-            resolve({ found: true, roomName, key });
-            return;
-          }
-        }
-
-        if (!gen.nextValid()) {
-          finish(false);
-          return;
-        }
-      }
-
-      const now = performance.now();
-      if (now - lastUpdate >= UPDATE_INTERVAL) {
-        updateStatus(gen.current(), false);
-        lastUpdate = now;
-      }
-
-      setTimeout(processBatch, 0);
-    }
-
-    function updateStatus(current: string, found: boolean) {
-      const elapsed = (performance.now() - startTime) / 1000;
-      const rate = Math.round(count / elapsed);
-      const remaining = gen.getRemainingInLength();
-      const etaSeconds = rate > 0 ? remaining / rate : 0;
-      const pct =
-        gen.getTotalForLength() > 0
-          ? (((gen.getTotalForLength() - remaining) / gen.getTotalForLength()) * 100).toFixed(1)
-          : '0';
-
-      if (found) {
-        statusEl.innerHTML =
-          `<div class="stat found">Found: #${escapeHtml(current)}</div>` +
-          `<div class="stat">Checked: ${count.toLocaleString()} keys in ${formatTime(elapsed)}</div>` +
-          `<div class="stat">Rate: ${formatRate(rate)}</div>`;
-      } else {
-        statusEl.innerHTML =
-          `<div class="stat">Current: #${escapeHtml(current)}</div>` +
-          `<div class="stat">Elapsed: ${formatTime(elapsed)} | Checked: ${count.toLocaleString()} keys (${formatRate(rate)})</div>` +
-          `<div class="stat">Length ${gen.getLength()}: ${pct}% complete, ~${formatTime(etaSeconds)} remaining</div>`;
-      }
-    }
-
-    function finish(found: boolean, roomName?: string, key?: string) {
-      const resumeInput = getResumeInput();
-      finishBruteForceUI(!!resumeInput?.value);
-      resolve({ found, roomName, key });
-    }
-
-    processBatch();
-  });
-}
-
-// GPU-accelerated brute force
-async function bruteForceGpu(
-  targetChannelHash: string,
-  ciphertext: string,
-  cipherMac: string,
-  startFrom?: string,
-): Promise<{ found: boolean; roomName?: string; key?: string }> {
-  if (!gpuInstance) {
-    throw new Error('GPU not available');
+  if (!cracker) {
+    return { found: false };
   }
 
   const { statusEl } = getBruteForceElements();
-
-  // Save for potential resume
-  savedTargetChannelHash = targetChannelHash;
-  savedCiphertext = ciphertext;
-  savedCipherMac = cipherMac;
-
+  savedPacketHex = packetHex;
   startBruteForceUI();
 
-  const startTime = performance.now();
-  let totalChecked = 0;
-  const targetHashByte = parseInt(targetChannelHash, 16);
-
-  // Parse start position
-  let startLength = 1;
-  let startOffset = 0;
-  if (startFrom) {
-    const pos = roomNameToIndex(startFrom);
-    if (pos) {
-      startLength = pos.length;
-      startOffset = pos.index;
-    }
-  }
-
-  // Check public key first (only if starting from beginning)
-  if (!startFrom) {
-    const publicResult = checkPublicKey(targetChannelHash, ciphertext, cipherMac, true);
-    if (publicResult) {
-      return publicResult;
-    }
-  }
-
-  // Auto-tuning parameters
-  const INITIAL_BATCH_SIZE = 32768; // Start small (32K)
-  const TARGET_DISPATCH_MS = 1000; // Target ~1s per dispatch
-  const MIN_BATCH_SIZE = 32768; // Don't go below 32K
-  let currentBatchSize = useAutoTune ? INITIAL_BATCH_SIZE : FIXED_BATCH_SIZE;
-  let batchSizeTuned = !useAutoTune; // Skip tuning if disabled
-
-  const UPDATE_INTERVAL = 100; // ms - 10 updates per second
-  let lastUpdate = performance.now();
-  let currentLength = startLength;
-  let currentOffset = startOffset;
-
-  // Iterate through lengths
-  for (let length = startLength; length <= 20 && !bruteForceAbort; length++) {
-    const totalForLength = gpuInstance.countNamesForLength(length);
-    let offset = length === startLength ? startOffset : 0;
-
-    while (offset < totalForLength && !bruteForceAbort) {
-      currentLength = length;
-      currentOffset = offset;
-      const batchSize = Math.min(currentBatchSize, totalForLength - offset);
-
-      // Time the GPU dispatch for auto-tuning
-      const dispatchStart = performance.now();
-
-      // Run GPU batch with MAC verification
-      const matches = await gpuInstance.runBatch(
-        targetHashByte,
-        length,
-        offset,
-        batchSize,
-        ciphertext,
-        cipherMac,
-      );
-
-      const dispatchTime = performance.now() - dispatchStart;
-      totalChecked += batchSize;
-
-      // Auto-tune batch size after first full-sized dispatch
-      // Only tune if we actually ran a full batch (not a partial at end of length)
-      if (!batchSizeTuned && batchSize >= INITIAL_BATCH_SIZE && dispatchTime > 0) {
-        // Calculate optimal batch size to hit target time
-        const scaleFactor = TARGET_DISPATCH_MS / dispatchTime;
-        const optimalBatchSize = Math.round(batchSize * scaleFactor);
-        // Round to nearest power of 2, with minimum
-        const rounded = Math.pow(
-          2,
-          Math.round(Math.log2(Math.max(MIN_BATCH_SIZE, optimalBatchSize))),
-        );
-        currentBatchSize = Math.max(MIN_BATCH_SIZE, rounded);
-        batchSizeTuned = true;
-        // Auto-tuned batch size based on dispatch time
-      }
-
-      // Verify MAC for each match (on CPU)
-      for (const matchIdx of matches) {
-        const roomName = gpuInstance.indexToRoomName(matchIdx, length);
-        if (!roomName) {
-          continue;
-        }
-
-        const key = deriveKeyFromRoomName('#' + roomName);
-        if (verifyMacAndTimestamp(ciphertext, cipherMac, key)) {
-          const elapsed = (performance.now() - startTime) / 1000;
-          const rate = Math.round(totalChecked / elapsed);
-          statusEl.innerHTML =
-            `<div class="stat found">Found: #${escapeHtml(roomName)}</div>` +
-            `<div class="stat">Mode: GPU accelerated${getBatchInfo(currentBatchSize, batchSizeTuned)}</div>` +
-            `<div class="stat">Checked: ${totalChecked.toLocaleString()} keys in ${formatTime(elapsed)}</div>` +
-            `<div class="stat">Rate: ${formatRate(rate)}</div>`;
-
-          // Save next position after the found match for resume
-          const nextName =
-            indexToRoomName(length, matchIdx + 1) || indexToRoomName(length + 1, 0) || '';
-          saveResumePosition(nextName);
-          finishBruteForceUI(true);
-          return { found: true, roomName, key };
-        }
-      }
-
-      offset += batchSize;
-
-      // Update status at most 10 times per second
-      const now = performance.now();
-      if (now - lastUpdate >= UPDATE_INTERVAL) {
-        const elapsed = (now - startTime) / 1000;
-        const rate = Math.round(totalChecked / elapsed);
-        const remaining = totalForLength - offset;
-        const etaSeconds = rate > 0 ? remaining / rate : 0;
-        const pct = ((offset / totalForLength) * 100).toFixed(1);
-
-        const batchInfo = getBatchInfo(currentBatchSize, batchSizeTuned);
+  try {
+    const result = await cracker.crack(
+      packetHex,
+      {
+        maxLength: 20,
+        useTimestampFilter,
+        useUtf8Filter: useUnicodeFilter,
+        startFrom,
+      },
+      (progress: ProgressReport) => {
+        // Update UI with progress
+        const pct = progress.percent.toFixed(1);
+        const modeText =
+          progress.phase === 'wordlist'
+            ? `dict: ${escapeHtml(progress.currentPosition)}`
+            : `GPU length ${progress.currentLength}`;
         statusEl.innerHTML =
-          `<div class="stat">Mode: GPU accelerated${batchInfo}</div>` +
-          `<div class="stat">Elapsed: ${formatTime(elapsed)} | Checked: ${totalChecked.toLocaleString()} keys (${formatRate(rate)})</div>` +
-          `<div class="stat">Length ${length}: ${pct}% complete, ~${formatTime(etaSeconds)} remaining</div>`;
+          `<div class="stat">Mode: ${modeText}</div>` +
+          `<div class="stat">Elapsed: ${formatTime(progress.elapsedSeconds)} | Checked: ${progress.checked.toLocaleString()} keys (${formatRate(progress.rateKeysPerSec)})</div>` +
+          `<div class="stat">${pct}% complete, ~${formatTime(progress.etaSeconds)} remaining</div>`;
+      },
+    );
 
-        lastUpdate = now;
-
-        // Yield to UI
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+    if (result.found && result.roomName && result.key) {
+      statusEl.innerHTML =
+        `<div class="stat found">Found: #${escapeHtml(result.roomName)}</div>` +
+        `<div class="stat">Key: ${result.key}</div>`;
+      saveResumePosition(result.resumeFrom || '');
+      finishBruteForceUI(true);
+      return { found: true, roomName: result.roomName, key: result.key };
     }
-  }
 
-  // Save position if we were aborted
-  if (bruteForceAbort) {
-    const currentName = indexToRoomName(currentLength, currentOffset) || '';
-    saveResumePosition(currentName);
-  }
+    if (result.aborted) {
+      saveResumePosition(result.resumeFrom || '');
+      finishBruteForceUI(!!result.resumeFrom);
+      return { found: false };
+    }
 
-  const resumeInput = getResumeInput();
-  finishBruteForceUI(!!resumeInput?.value);
-  return { found: false };
+    // Not found
+    finishBruteForceUI(false);
+    statusEl.innerHTML = '<div class="stat warning">Room name not found within search limits</div>';
+    return { found: false };
+  } catch (e) {
+    finishBruteForceUI(false);
+    statusEl.innerHTML = `<div class="stat error">Error: ${escapeHtml((e as Error).message)}</div>`;
+    return { found: false };
+  }
 }
 
 function formatPayload(
@@ -618,6 +317,7 @@ function formatOutput(
 }
 
 let lastPacket: DecodedPacket | null = null;
+let lastPacketHex = '';
 let autoDetectedPublic = false;
 
 function updateRoomPrefix() {
@@ -643,10 +343,12 @@ async function analyze(): Promise<void> {
     bruteBtn.disabled = true;
     bruteBtn.textContent = 'Start';
     lastPacket = null;
+    lastPacketHex = '';
     autoDetectedPublic = false;
     return;
   }
 
+  lastPacketHex = packetHex;
   outputEl.style.display = 'block';
 
   try {
@@ -706,45 +408,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   const packetInput = document.getElementById('packet') as HTMLTextAreaElement;
   const bruteBtn = document.getElementById('brute-btn') as HTMLButtonElement;
   const statusEl = document.getElementById('brute-status')!;
-  const gpuToggle = document.getElementById('gpu-toggle') as HTMLInputElement | null;
-  const gpuStatus = document.getElementById('gpu-status') as HTMLElement | null;
 
-  // Initialize GPU
-  if (isWebGpuSupported()) {
-    gpuInstance = await getGpuBruteForce();
-    gpuAvailable = gpuInstance !== null;
-  }
+  // Initialize cracker
+  cracker = new GroupTextCracker();
+  crackerInitialized = true;
 
-  // Update GPU status in UI
-  if (gpuStatus) {
-    if (gpuAvailable) {
-      gpuStatus.textContent = 'GPU: Available';
-      gpuStatus.classList.add('success');
-    } else if (isWebGpuSupported()) {
-      gpuStatus.textContent = 'GPU: Init failed';
-      gpuStatus.classList.add('warning');
-    } else {
-      gpuStatus.textContent = 'GPU: Not supported';
-      gpuStatus.classList.add('muted');
-    }
-  }
-
-  // GPU toggle handler
-  if (gpuToggle) {
-    gpuToggle.checked = gpuAvailable && useGpu;
-    gpuToggle.disabled = !gpuAvailable;
-    gpuToggle.addEventListener('change', () => {
-      useGpu = gpuToggle.checked;
-    });
-  }
-
-  // Auto-tune toggle handler
-  const autoTuneToggle = document.getElementById('auto-tune-toggle') as HTMLInputElement | null;
-  if (autoTuneToggle) {
-    autoTuneToggle.checked = useAutoTune;
-    autoTuneToggle.addEventListener('change', () => {
-      useAutoTune = autoTuneToggle.checked;
-    });
+  // Try to load wordlist (optional, won't fail if not found)
+  try {
+    await cracker.loadWordlist('./words_alpha.txt');
+  } catch {
+    // Wordlist not available, dictionary attack will be skipped
   }
 
   // Timestamp filter toggle handler
@@ -828,11 +501,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   bruteBtn.addEventListener('click', async () => {
     if (bruteForceRunning) {
-      bruteForceAbort = true;
+      cracker?.abort();
       return;
     }
 
-    if (!lastPacket?.payload?.decoded) {
+    if (!lastPacket?.payload?.decoded || !lastPacketHex) {
       return;
     }
 
@@ -844,25 +517,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Get resume position from input
     const startFrom = resumeInput.value.trim() || undefined;
 
-    let result: { found: boolean; roomName?: string; key?: string };
-
-    if (gpuAvailable && useGpu) {
-      // Use GPU-accelerated brute force
-      result = await bruteForceGpu(
-        decoded.channelHash.toLowerCase(),
-        decoded.ciphertext,
-        decoded.cipherMac,
-        startFrom,
-      );
-    } else {
-      // Fall back to CPU brute force
-      result = await bruteForce(
-        decoded.channelHash.toLowerCase(),
-        decoded.ciphertext,
-        decoded.cipherMac,
-        startFrom,
-      );
-    }
+    const result = await runCracker(lastPacketHex, startFrom);
 
     if (result.found && result.roomName && result.key) {
       // Populate fields and re-analyze
@@ -879,7 +534,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const startFrom = resumeInput.value.trim();
-    if (!startFrom) {
+    if (!startFrom || !savedPacketHex) {
       return;
     }
 
@@ -889,18 +544,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     analyze();
 
     // Resume search from saved position
-    let result: { found: boolean; roomName?: string; key?: string };
-
-    if (gpuAvailable && useGpu) {
-      result = await bruteForceGpu(
-        savedTargetChannelHash,
-        savedCiphertext,
-        savedCipherMac,
-        startFrom,
-      );
-    } else {
-      result = await bruteForce(savedTargetChannelHash, savedCiphertext, savedCipherMac, startFrom);
-    }
+    const result = await runCracker(savedPacketHex, startFrom);
 
     if (result.found && result.roomName && result.key) {
       roomInput.value = result.roomName;

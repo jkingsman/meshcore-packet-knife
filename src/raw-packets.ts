@@ -1,7 +1,7 @@
 import { MeshCorePacketDecoder, Utils } from '@michaelhart/meshcore-decoder';
 // @ts-expect-error - meshcore.js doesn't have type definitions
 import { WebSerialConnection, Constants } from '@liamcottle/meshcore.js';
-import { escapeHtml } from './core';
+import { escapeHtml } from './utils';
 
 // Convert Uint8Array to hex string
 function toHexString(bytes: Uint8Array): string {
