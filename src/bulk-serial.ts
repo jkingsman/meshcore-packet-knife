@@ -1002,7 +1002,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadKnownKeysFromStorage();
   updateKnownKeysDisplay();
 
-  const crackerStatus = document.getElementById('gpu-status')!;
+  const crackerStatus = document.getElementById('cracker-status')!;
   const serialNotSupported = document.getElementById('serial-not-supported')!;
 
   // Check for Web Serial support

@@ -411,7 +411,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Initialize cracker
   cracker = new GroupTextCracker();
-  crackerInitialized = true;
 
   // Try to load wordlist (optional, won't fail if not found)
   try {

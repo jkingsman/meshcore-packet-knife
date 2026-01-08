@@ -590,13 +590,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Initialize cracker
+  const crackerStatus = document.getElementById('cracker-status');
   cracker = new GroupTextCracker();
 
   // Try to load wordlist (optional)
   try {
     await cracker.loadWordlist('./words_alpha.txt');
+    if (crackerStatus) {
+      crackerStatus.textContent = 'Cracker: Ready';
+      crackerStatus.classList.add('success');
+    }
   } catch {
     // Wordlist not available, dictionary attack will be skipped
+    if (crackerStatus) {
+      crackerStatus.textContent = 'Cracker: Ready (no wordlist)';
+      crackerStatus.classList.add('success');
+    }
   }
 
   // Add button handler
