@@ -422,27 +422,24 @@ async function processItem(item: QueueItem): Promise<void> {
   }
 
   try {
-    const result = await cracker.crack(
-      item.packetHex,
-      {
-        maxLength: item.maxLength,
-        useTimestampFilter,
-        useUtf8Filter: useUnicodeFilter,
-        startFrom: item.startFrom,
-        startFromType: item.startFromType,
-      },
-      (progress: ProgressReport) => {
-        currentRate = progress.rateKeysPerSec;
-        item.testedUpToLength = progress.currentLength;
-        item.progressPercent = progress.percent;
-        item.checkedCount = progress.checked;
-        item.totalCandidates = progress.total;
-        item.testedUpTo = progress.currentPosition;
-        item.phase = progress.phase;
-        updateRow(item);
-        updateStatusBar();
-      },
-    );
+    const crackOptions = {
+      maxLength: item.maxLength,
+      useTimestampFilter,
+      useUtf8Filter: useUnicodeFilter,
+      startFrom: item.startFrom,
+      startFromType: item.startFromType,
+    };
+    const result = await cracker.crack(item.packetHex, crackOptions, (progress: ProgressReport) => {
+      currentRate = progress.rateKeysPerSec;
+      item.testedUpToLength = progress.currentLength;
+      item.progressPercent = progress.percent;
+      item.checkedCount = progress.checked;
+      item.totalCandidates = progress.total;
+      item.testedUpTo = progress.currentPosition;
+      item.phase = progress.phase;
+      updateRow(item);
+      updateStatusBar();
+    });
 
     if (result.found && result.roomName && result.key) {
       // Decrypt to get sender/message
@@ -600,7 +597,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const crackerStatus = document.getElementById('cracker-status');
   cracker = new GroupTextCracker();
 
-  // Try to load wordlist (optional)
+  // Load wordlist for dictionary attacks
   try {
     await cracker.loadWordlist('./words_alpha.txt');
     if (crackerStatus) {
@@ -608,10 +605,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       crackerStatus.classList.add('success');
     }
   } catch {
-    // Wordlist not available, dictionary attack will be skipped
     if (crackerStatus) {
       crackerStatus.textContent = 'Cracker: Ready (no wordlist)';
-      crackerStatus.classList.add('success');
+      crackerStatus.classList.add('warning');
     }
   }
 

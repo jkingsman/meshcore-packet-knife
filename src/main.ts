@@ -428,7 +428,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const crackerStatus = document.getElementById('cracker-status');
   cracker = new GroupTextCracker();
 
-  // Try to load wordlist (optional, won't fail if not found)
+  // Load wordlist for dictionary attacks
   try {
     await cracker.loadWordlist('./words_alpha.txt');
     if (crackerStatus) {
@@ -436,10 +436,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       crackerStatus.classList.add('success');
     }
   } catch {
-    // Wordlist not available, dictionary attack will be skipped
     if (crackerStatus) {
       crackerStatus.textContent = 'Cracker: Ready (no wordlist)';
-      crackerStatus.classList.add('success');
+      crackerStatus.classList.add('warning');
     }
   }
 

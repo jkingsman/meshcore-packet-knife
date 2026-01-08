@@ -176,25 +176,21 @@ let connectionStatusEl: HTMLElement;
 let packetsReceivedEl: HTMLElement;
 let lastPacketTimeEl: HTMLElement;
 
-// Verify MAC and decrypt (no content filtering - library handles that)
-function verifyMacAndDecrypt(
+// Try to decrypt with a known key (verify MAC, but no content filtering - library handles that during crack())
+function tryDecryptWithKey(
   ciphertext: string,
   cipherMac: string,
   keyHex: string,
 ): { valid: boolean; sender?: string; message?: string } {
-  // Only verify MAC to confirm the key is correct
+  // Verify MAC first to confirm the key is correct
   if (!verifyMac(ciphertext, cipherMac, keyHex)) {
     return { valid: false };
   }
-
   // Decrypt to get sender/message for display
   const result = ChannelCrypto.decryptGroupTextMessage(ciphertext, cipherMac, keyHex);
   if (!result.success || !result.data) {
     return { valid: false };
   }
-
-  // Don't apply timestamp/UTF-8 filters here - the library handles that during crack()
-  // We're just verifying the key is correct for known keys lookup
   return { valid: true, sender: result.data.sender, message: result.data.message };
 }
 
@@ -641,7 +637,7 @@ function tryKnownKeys(item: QueueItem): boolean {
   // Check if we have a known key for this channel hash
   const known = knownKeys.get(item.channelHash);
   if (known) {
-    const result = verifyMacAndDecrypt(item.ciphertext, item.cipherMac, known.key);
+    const result = tryDecryptWithKey(item.ciphertext, item.cipherMac, known.key);
     if (result.valid) {
       item.status = 'found';
       item.roomName = known.roomName;
@@ -659,7 +655,7 @@ function tryKnownKeys(item: QueueItem): boolean {
   // Also try public key
   const publicChannelHash = getChannelHash(PUBLIC_KEY);
   if (item.channelHash === publicChannelHash) {
-    const result = verifyMacAndDecrypt(item.ciphertext, item.cipherMac, PUBLIC_KEY);
+    const result = tryDecryptWithKey(item.ciphertext, item.cipherMac, PUBLIC_KEY);
     if (result.valid) {
       item.status = 'found';
       item.roomName = PUBLIC_ROOM_NAME;
@@ -689,29 +685,26 @@ async function processItem(item: QueueItem): Promise<void> {
   }
 
   try {
-    const result = await cracker.crack(
-      item.packetHex,
-      {
-        maxLength: item.maxLength,
-        useTimestampFilter,
-        useUtf8Filter: useUnicodeFilter,
-        startFrom: item.startFrom,
-        startFromType: item.startFromType,
-      },
-      (progress: ProgressReport) => {
-        // Update UI with progress
-        currentRate = progress.rateKeysPerSec;
-        item.progressPercent = progress.percent;
-        item.checkedCount = progress.checked;
-        item.totalCandidates = progress.total;
-        item.testedUpToLength = progress.currentLength;
-        item.testedUpTo = progress.currentPosition;
-        item.phase = progress.phase;
+    const crackOptions = {
+      maxLength: item.maxLength,
+      useTimestampFilter,
+      useUtf8Filter: useUnicodeFilter,
+      startFrom: item.startFrom,
+      startFromType: item.startFromType,
+    };
+    const result = await cracker.crack(item.packetHex, crackOptions, (progress: ProgressReport) => {
+      // Update UI with progress
+      currentRate = progress.rateKeysPerSec;
+      item.progressPercent = progress.percent;
+      item.checkedCount = progress.checked;
+      item.totalCandidates = progress.total;
+      item.testedUpToLength = progress.currentLength;
+      item.testedUpTo = progress.currentPosition;
+      item.phase = progress.phase;
 
-        updateRow(item);
-        updateStatusBar();
-      },
-    );
+      updateRow(item);
+      updateStatusBar();
+    });
 
     if (result.found && result.roomName && result.key) {
       item.status = 'found';
@@ -803,7 +796,7 @@ function toHexString(bytes: Uint8Array): string {
 
 // Add packet to queue (called when receiving from serial)
 async function addPacket(packetHex: string, maxLength: number): Promise<void> {
-  const cleanHex = packetHex.trim().replace(/\s+/g, '').replace(/^0x/i, '').toLowerCase();
+  const cleanHex = packetHex.trim().replace(/\s+/g, '').replace(/^0x/i, '');
 
   if (!cleanHex || !/^[0-9a-fA-F]+$/.test(cleanHex)) {
     return;
@@ -1060,14 +1053,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Initialize cracker
   cracker = new GroupTextCracker();
 
-  // Try to load wordlist (optional, won't fail if not found)
+  // Load wordlist for dictionary attacks
   try {
     await cracker.loadWordlist('./words_alpha.txt');
     crackerStatus.textContent = 'Cracker: Ready';
     crackerStatus.classList.add('success');
-  } catch (err) {
-    // Wordlist not available, dictionary attack will be skipped
-    console.error('Failed to load wordlist:', err);
+  } catch {
     crackerStatus.textContent = 'Cracker: Ready (no wordlist)';
     crackerStatus.classList.add('warning');
   }
