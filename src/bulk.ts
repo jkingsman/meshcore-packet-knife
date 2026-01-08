@@ -6,6 +6,7 @@ import {
   getChannelHash,
   verifyMac,
   roomNameToIndex,
+  indexToRoomName,
   countNamesForLength,
   isTimestampValid as coreIsTimestampValid,
   isValidUtf8 as coreIsValidUtf8,
@@ -348,8 +349,9 @@ function skipAndContinue(id: number): void {
         nextLength = pos.length + 1;
         nextIndex = 0;
       }
-      // Create a startFrom string (approximation - the library will handle it)
-      item.startFrom = 'a'.repeat(nextLength);
+      // Compute the actual next room name to resume from
+      const nextName = indexToRoomName(nextLength, nextIndex);
+      item.startFrom = nextName || 'a'.repeat(nextLength);
     }
   }
 

@@ -12,6 +12,7 @@ import {
   PUBLIC_ROOM_NAME,
   PUBLIC_KEY,
   roomNameToIndex,
+  indexToRoomName,
   countNamesForLength,
   ProgressReport,
 } from 'meshcore-hashtag-cracker';
@@ -32,11 +33,12 @@ interface QueueItem {
   testedUpTo?: string;
   testedUpToLength?: number;
   maxLength: number;
-  startFrom?: string; // Resume position in "length:index" format
+  startFrom?: string; // Resume position (room name to start from)
   progressPercent?: number;
   totalCandidates?: number;
   checkedCount?: number;
   phase?: 'public-key' | 'wordlist' | 'bruteforce';
+  skipDictionary?: boolean;
   error?: string;
 }
 
@@ -550,14 +552,15 @@ function retryWithHigherLimit(id: number): void {
   }
 
   // Increase max length by 1, start from the next length
-  const nextLength = (item.testedUpToLength || item.maxLength) + 1;
-  item.maxLength = nextLength;
-  item.startFrom = `${nextLength}:0`;
+  const newStartLength = (item.testedUpToLength || 1) + 1;
+  item.maxLength = (item.testedUpToLength || item.maxLength) + 1;
+  item.startFrom = 'a'.repeat(newStartLength); // Start of next length
   item.status = 'pending';
   item.testedUpTo = undefined;
   item.progressPercent = undefined;
   item.totalCandidates = undefined;
   item.checkedCount = undefined;
+  item.skipDictionary = true; // Already tried dictionary
   failedCount--;
 
   updateRow(item);
@@ -581,13 +584,17 @@ function skipAndContinue(id: number): void {
   if (item.roomName) {
     const pos = roomNameToIndex(item.roomName);
     if (pos) {
-      const nextIndex = pos.index + 1;
+      // Start from the next index after the false positive
+      let nextIndex = pos.index + 1;
+      let nextLength = pos.length;
       // If we've exhausted this length, move to next
       if (nextIndex >= countNamesForLength(pos.length)) {
-        item.startFrom = `${pos.length + 1}:0`;
-      } else {
-        item.startFrom = `${pos.length}:${nextIndex}`;
+        nextLength = pos.length + 1;
+        nextIndex = 0;
       }
+      // Get the actual next room name to resume from
+      const nextName = indexToRoomName(nextLength, nextIndex);
+      item.startFrom = nextName || 'a'.repeat(nextLength);
     }
   }
 
@@ -600,6 +607,7 @@ function skipAndContinue(id: number): void {
   item.progressPercent = undefined;
   item.totalCandidates = undefined;
   item.checkedCount = undefined;
+  item.skipDictionary = true; // Already tried dictionary
   foundCount--;
 
   updateRow(item);
@@ -704,6 +712,7 @@ async function processItem(item: QueueItem): Promise<void> {
         useTimestampFilter,
         useUtf8Filter: useUnicodeFilter,
         startFrom: item.startFrom,
+        useDictionary: !item.skipDictionary,
       },
       (progress: ProgressReport) => {
         // Update UI with progress

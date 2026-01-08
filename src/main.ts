@@ -12,6 +12,9 @@ import {
   PUBLIC_ROOM_NAME,
   PUBLIC_KEY,
   ProgressReport,
+  roomNameToIndex,
+  indexToRoomName,
+  countNamesForLength,
 } from 'meshcore-hashtag-cracker';
 import { escapeHtml } from './utils';
 
@@ -21,6 +24,8 @@ let cracker: GroupTextCracker | null = null;
 // Brute force state
 let bruteForceRunning = false;
 let savedPacketHex = '';
+let lastFoundRoomName = '';
+let lastFoundPhase: 'wordlist' | 'bruteforce' | '' = '';
 
 // Filter options
 let useTimestampFilter = true;
@@ -99,6 +104,7 @@ function saveResumePosition(roomName: string) {
 async function runCracker(
   packetHex: string,
   startFrom?: string,
+  skipDictionary?: boolean,
 ): Promise<{ found: boolean; roomName?: string; key?: string }> {
   if (!cracker) {
     return { found: false };
@@ -109,6 +115,7 @@ async function runCracker(
   startBruteForceUI();
 
   try {
+    let currentPhase: 'wordlist' | 'bruteforce' | '' = '';
     const result = await cracker.crack(
       packetHex,
       {
@@ -116,8 +123,13 @@ async function runCracker(
         useTimestampFilter,
         useUtf8Filter: useUnicodeFilter,
         startFrom,
+        useDictionary: !skipDictionary,
       },
       (progress: ProgressReport) => {
+        // Track current phase for skip functionality
+        if (progress.phase === 'wordlist' || progress.phase === 'bruteforce') {
+          currentPhase = progress.phase;
+        }
         // Update UI with progress
         const pct = progress.percent.toFixed(1);
         const modeText =
@@ -135,6 +147,8 @@ async function runCracker(
       statusEl.innerHTML =
         `<div class="stat found">Found: #${escapeHtml(result.roomName)}</div>` +
         `<div class="stat">Key: ${result.key}</div>`;
+      lastFoundRoomName = result.roomName;
+      lastFoundPhase = currentPhase;
       saveResumePosition(result.resumeFrom || '');
       finishBruteForceUI(true);
       return { found: true, roomName: result.roomName, key: result.key };
@@ -410,13 +424,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   const statusEl = document.getElementById('brute-status')!;
 
   // Initialize cracker
+  const crackerStatus = document.getElementById('cracker-status');
   cracker = new GroupTextCracker();
 
   // Try to load wordlist (optional, won't fail if not found)
   try {
     await cracker.loadWordlist('./words_alpha.txt');
+    if (crackerStatus) {
+      crackerStatus.textContent = 'Cracker: Ready';
+      crackerStatus.classList.add('success');
+    }
   } catch {
     // Wordlist not available, dictionary attack will be skipped
+    if (crackerStatus) {
+      crackerStatus.textContent = 'Cracker: Ready (no wordlist)';
+      crackerStatus.classList.add('success');
+    }
   }
 
   // Timestamp filter toggle handler
@@ -532,9 +555,31 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    const startFrom = resumeInput.value.trim();
-    if (!startFrom || !savedPacketHex) {
+    if (!lastFoundRoomName || !savedPacketHex) {
       return;
+    }
+
+    // Calculate the next position after the false positive
+    let nextStartFrom: string;
+    if (lastFoundPhase === 'bruteforce') {
+      // Brute force match - calculate next position in enumeration
+      const pos = roomNameToIndex(lastFoundRoomName);
+      if (pos) {
+        let nextIndex = pos.index + 1;
+        let nextLength = pos.length;
+        // If we've exhausted this length, move to next
+        if (nextIndex >= countNamesForLength(pos.length)) {
+          nextLength = pos.length + 1;
+          nextIndex = 0;
+        }
+        const nextName = indexToRoomName(nextLength, nextIndex);
+        nextStartFrom = nextName || 'a'.repeat(nextLength);
+      } else {
+        nextStartFrom = 'a';
+      }
+    } else {
+      // Dictionary match - skip dictionary and start brute force from beginning
+      nextStartFrom = 'a';
     }
 
     // Clear the populated fields
@@ -542,8 +587,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     keyInput.value = '';
     analyze();
 
-    // Resume search from saved position
-    const result = await runCracker(savedPacketHex, startFrom);
+    // Resume search from next position, skipping dictionary (already tried all words)
+    const result = await runCracker(savedPacketHex, nextStartFrom, true);
 
     if (result.found && result.roomName && result.key) {
       roomInput.value = result.roomName;
