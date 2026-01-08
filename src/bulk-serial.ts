@@ -7,13 +7,8 @@ import {
   deriveKeyFromRoomName,
   getChannelHash,
   verifyMac,
-  isTimestampValid as coreIsTimestampValid,
-  isValidUtf8 as coreIsValidUtf8,
   PUBLIC_ROOM_NAME,
   PUBLIC_KEY,
-  roomNameToIndex,
-  indexToRoomName,
-  countNamesForLength,
   ProgressReport,
 } from 'meshcore-hashtag-cracker';
 import { escapeHtml } from './utils';
@@ -33,12 +28,14 @@ interface QueueItem {
   testedUpTo?: string;
   testedUpToLength?: number;
   maxLength: number;
-  startFrom?: string; // Resume position (room name to start from)
+  startFrom?: string;
+  startFromType?: 'dictionary' | 'bruteforce';
+  resumeFrom?: string;
+  resumeType?: 'dictionary' | 'bruteforce';
   progressPercent?: number;
   totalCandidates?: number;
   checkedCount?: number;
   phase?: 'public-key' | 'wordlist' | 'bruteforce';
-  skipDictionary?: boolean;
   error?: string;
 }
 
@@ -179,38 +176,25 @@ let connectionStatusEl: HTMLElement;
 let packetsReceivedEl: HTMLElement;
 let lastPacketTimeEl: HTMLElement;
 
-// Filter wrappers
-function isTimestampValid(timestamp: number): boolean {
-  return !useTimestampFilter || coreIsTimestampValid(timestamp);
-}
-
-function isValidUtf8(text: string): boolean {
-  return !useUnicodeFilter || coreIsValidUtf8(text);
-}
-
-// Verify MAC and check filters
-function verifyMacAndFilters(
+// Verify MAC and decrypt (no content filtering - library handles that)
+function verifyMacAndDecrypt(
   ciphertext: string,
   cipherMac: string,
   keyHex: string,
 ): { valid: boolean; sender?: string; message?: string } {
+  // Only verify MAC to confirm the key is correct
   if (!verifyMac(ciphertext, cipherMac, keyHex)) {
     return { valid: false };
   }
 
+  // Decrypt to get sender/message for display
   const result = ChannelCrypto.decryptGroupTextMessage(ciphertext, cipherMac, keyHex);
   if (!result.success || !result.data) {
     return { valid: false };
   }
 
-  if (!isTimestampValid(result.data.timestamp)) {
-    return { valid: false };
-  }
-
-  if (!isValidUtf8(result.data.message)) {
-    return { valid: false };
-  }
-
+  // Don't apply timestamp/UTF-8 filters here - the library handles that during crack()
+  // We're just verifying the key is correct for known keys lookup
   return { valid: true, sender: result.data.sender, message: result.data.message };
 }
 
@@ -551,16 +535,22 @@ function retryWithHigherLimit(id: number): void {
     return;
   }
 
-  // Increase max length by 1, start from the next length
-  const newStartLength = (item.testedUpToLength || 1) + 1;
+  // Increase max length by 1, start from where we left off
   item.maxLength = (item.testedUpToLength || item.maxLength) + 1;
-  item.startFrom = 'a'.repeat(newStartLength); // Start of next length
+  // Use resume position if available, otherwise start at next length
+  if (item.resumeFrom) {
+    item.startFrom = item.resumeFrom;
+    item.startFromType = item.resumeType;
+  } else {
+    const newStartLength = (item.testedUpToLength || 1) + 1;
+    item.startFrom = 'a'.repeat(newStartLength);
+    item.startFromType = 'bruteforce';
+  }
   item.status = 'pending';
   item.testedUpTo = undefined;
   item.progressPercent = undefined;
   item.totalCandidates = undefined;
   item.checkedCount = undefined;
-  item.skipDictionary = true; // Already tried dictionary
   failedCount--;
 
   updateRow(item);
@@ -580,22 +570,11 @@ function skipAndContinue(id: number): void {
     removeKnownKey(item.channelHash);
   }
 
-  // Resume from the position after the false positive
-  if (item.roomName) {
-    const pos = roomNameToIndex(item.roomName);
-    if (pos) {
-      // Start from the next index after the false positive
-      let nextIndex = pos.index + 1;
-      let nextLength = pos.length;
-      // If we've exhausted this length, move to next
-      if (nextIndex >= countNamesForLength(pos.length)) {
-        nextLength = pos.length + 1;
-        nextIndex = 0;
-      }
-      // Get the actual next room name to resume from
-      const nextName = indexToRoomName(nextLength, nextIndex);
-      item.startFrom = nextName || 'a'.repeat(nextLength);
-    }
+  // Resume from after the false positive using library's resume info
+  // Library v1.2.0+: startFrom means "start AFTER" (exclusive), and resumeFrom is set on success
+  if (item.resumeFrom) {
+    item.startFrom = item.resumeFrom;
+    item.startFromType = item.resumeType;
   }
 
   // Clear the found result
@@ -607,7 +586,6 @@ function skipAndContinue(id: number): void {
   item.progressPercent = undefined;
   item.totalCandidates = undefined;
   item.checkedCount = undefined;
-  item.skipDictionary = true; // Already tried dictionary
   foundCount--;
 
   updateRow(item);
@@ -663,13 +641,16 @@ function tryKnownKeys(item: QueueItem): boolean {
   // Check if we have a known key for this channel hash
   const known = knownKeys.get(item.channelHash);
   if (known) {
-    const result = verifyMacAndFilters(item.ciphertext, item.cipherMac, known.key);
+    const result = verifyMacAndDecrypt(item.ciphertext, item.cipherMac, known.key);
     if (result.valid) {
       item.status = 'found';
       item.roomName = known.roomName;
       item.key = known.key;
       item.sender = result.sender;
       item.message = result.message;
+      // Set resume info for skip functionality
+      item.resumeFrom = known.roomName;
+      item.resumeType = 'bruteforce';
       foundCount++;
       return true;
     }
@@ -678,13 +659,16 @@ function tryKnownKeys(item: QueueItem): boolean {
   // Also try public key
   const publicChannelHash = getChannelHash(PUBLIC_KEY);
   if (item.channelHash === publicChannelHash) {
-    const result = verifyMacAndFilters(item.ciphertext, item.cipherMac, PUBLIC_KEY);
+    const result = verifyMacAndDecrypt(item.ciphertext, item.cipherMac, PUBLIC_KEY);
     if (result.valid) {
       item.status = 'found';
       item.roomName = PUBLIC_ROOM_NAME;
       item.key = PUBLIC_KEY;
       item.sender = result.sender;
       item.message = result.message;
+      // Set resume info for skip functionality
+      item.resumeFrom = PUBLIC_ROOM_NAME;
+      item.resumeType = 'bruteforce';
       foundCount++;
       addKnownKey(item.channelHash, PUBLIC_ROOM_NAME, PUBLIC_KEY);
       return true;
@@ -712,7 +696,7 @@ async function processItem(item: QueueItem): Promise<void> {
         useTimestampFilter,
         useUtf8Filter: useUnicodeFilter,
         startFrom: item.startFrom,
-        useDictionary: !item.skipDictionary,
+        startFromType: item.startFromType,
       },
       (progress: ProgressReport) => {
         // Update UI with progress
@@ -734,6 +718,9 @@ async function processItem(item: QueueItem): Promise<void> {
       item.roomName = result.roomName;
       item.key = result.key;
       item.testedUpToLength = result.roomName.length;
+      // Save resume info for skip functionality - use values from library result
+      item.resumeFrom = result.resumeFrom || result.roomName;
+      item.resumeType = result.resumeType;
 
       // Decrypt to get sender/message
       if (item.ciphertext && item.cipherMac) {
@@ -757,6 +744,9 @@ async function processItem(item: QueueItem): Promise<void> {
     } else {
       item.status = 'failed';
       item.testedUpToLength = item.maxLength;
+      // Save resume info for retry functionality
+      item.resumeFrom = result.resumeFrom;
+      item.resumeType = result.resumeType;
       failedCount++;
     }
   } catch (err) {
@@ -1067,15 +1057,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Initialize cracker and load wordlist
+  // Initialize cracker
+  cracker = new GroupTextCracker();
+
+  // Try to load wordlist (optional, won't fail if not found)
   try {
-    cracker = new GroupTextCracker();
     await cracker.loadWordlist('./words_alpha.txt');
     crackerStatus.textContent = 'Cracker: Ready';
     crackerStatus.classList.add('success');
   } catch (err) {
-    console.error('Failed to initialize cracker:', err);
-    crackerStatus.textContent = 'Cracker: Init failed';
+    // Wordlist not available, dictionary attack will be skipped
+    console.error('Failed to load wordlist:', err);
+    crackerStatus.textContent = 'Cracker: Ready (no wordlist)';
     crackerStatus.classList.add('warning');
   }
 

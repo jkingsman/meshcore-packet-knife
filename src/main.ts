@@ -12,9 +12,6 @@ import {
   PUBLIC_ROOM_NAME,
   PUBLIC_KEY,
   ProgressReport,
-  roomNameToIndex,
-  indexToRoomName,
-  countNamesForLength,
 } from 'meshcore-hashtag-cracker';
 import { escapeHtml } from './utils';
 
@@ -24,8 +21,8 @@ let cracker: GroupTextCracker | null = null;
 // Brute force state
 let bruteForceRunning = false;
 let savedPacketHex = '';
-let lastFoundRoomName = '';
-let lastFoundPhase: 'wordlist' | 'bruteforce' | '' = '';
+let lastFoundType: 'dictionary' | 'bruteforce' | undefined;
+let lastResumeFrom = ''; // Position to resume from after a match
 
 // Filter options
 let useTimestampFilter = true;
@@ -104,7 +101,7 @@ function saveResumePosition(roomName: string) {
 async function runCracker(
   packetHex: string,
   startFrom?: string,
-  skipDictionary?: boolean,
+  startFromType?: 'dictionary' | 'bruteforce',
 ): Promise<{ found: boolean; roomName?: string; key?: string }> {
   if (!cracker) {
     return { found: false };
@@ -115,7 +112,6 @@ async function runCracker(
   startBruteForceUI();
 
   try {
-    let currentPhase: 'wordlist' | 'bruteforce' | '' = '';
     const result = await cracker.crack(
       packetHex,
       {
@@ -123,23 +119,24 @@ async function runCracker(
         useTimestampFilter,
         useUtf8Filter: useUnicodeFilter,
         startFrom,
-        useDictionary: !skipDictionary,
+        startFromType,
       },
       (progress: ProgressReport) => {
-        // Track current phase for skip functionality
-        if (progress.phase === 'wordlist' || progress.phase === 'bruteforce') {
-          currentPhase = progress.phase;
-        }
         // Update UI with progress
-        const pct = progress.percent.toFixed(1);
         const modeText =
           progress.phase === 'wordlist'
             ? `dict: ${escapeHtml(progress.currentPosition)}`
             : `GPU length ${progress.currentLength}`;
+        // Sanity check ETA - if > 1 year, progress tracking is likely wrong (e.g., resumed search)
+        const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
+        const etaReasonable = progress.etaSeconds < ONE_YEAR_SECONDS && progress.percent > 0;
+        const progressLine = etaReasonable
+          ? `<div class="stat">${progress.percent.toFixed(1)}% complete, ~${formatTime(progress.etaSeconds)} remaining</div>`
+          : `<div class="stat">Searching length ${progress.currentLength}...</div>`;
         statusEl.innerHTML =
           `<div class="stat">Mode: ${modeText}</div>` +
           `<div class="stat">Elapsed: ${formatTime(progress.elapsedSeconds)} | Checked: ${progress.checked.toLocaleString()} keys (${formatRate(progress.rateKeysPerSec)})</div>` +
-          `<div class="stat">${pct}% complete, ~${formatTime(progress.etaSeconds)} remaining</div>`;
+          progressLine;
       },
     );
 
@@ -147,9 +144,11 @@ async function runCracker(
       statusEl.innerHTML =
         `<div class="stat found">Found: #${escapeHtml(result.roomName)}</div>` +
         `<div class="stat">Key: ${result.key}</div>`;
-      lastFoundRoomName = result.roomName;
-      lastFoundPhase = currentPhase;
-      saveResumePosition(result.resumeFrom || '');
+      // Save found info for skip functionality - use result.resumeType from library
+      lastFoundType = result.resumeType;
+      // Use resumeFrom from result (correct position to resume from after this match)
+      lastResumeFrom = result.resumeFrom || result.roomName;
+      saveResumePosition(lastResumeFrom);
       finishBruteForceUI(true);
       return { found: true, roomName: result.roomName, key: result.key };
     }
@@ -359,6 +358,8 @@ async function analyze(): Promise<void> {
     lastPacket = null;
     lastPacketHex = '';
     autoDetectedPublic = false;
+    lastFoundType = undefined;
+    lastResumeFrom = '';
     return;
   }
 
@@ -555,31 +556,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
 
-    if (!lastFoundRoomName || !savedPacketHex) {
+    if (!lastResumeFrom || !savedPacketHex) {
       return;
-    }
-
-    // Calculate the next position after the false positive
-    let nextStartFrom: string;
-    if (lastFoundPhase === 'bruteforce') {
-      // Brute force match - calculate next position in enumeration
-      const pos = roomNameToIndex(lastFoundRoomName);
-      if (pos) {
-        let nextIndex = pos.index + 1;
-        let nextLength = pos.length;
-        // If we've exhausted this length, move to next
-        if (nextIndex >= countNamesForLength(pos.length)) {
-          nextLength = pos.length + 1;
-          nextIndex = 0;
-        }
-        const nextName = indexToRoomName(nextLength, nextIndex);
-        nextStartFrom = nextName || 'a'.repeat(nextLength);
-      } else {
-        nextStartFrom = 'a';
-      }
-    } else {
-      // Dictionary match - skip dictionary and start brute force from beginning
-      nextStartFrom = 'a';
     }
 
     // Clear the populated fields
@@ -587,8 +565,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     keyInput.value = '';
     analyze();
 
-    // Resume search from next position, skipping dictionary (already tried all words)
-    const result = await runCracker(savedPacketHex, nextStartFrom, true);
+    // Resume search from the position after the false positive
+    // Use lastResumeFrom which is the correct resume position from the library
+    const result = await runCracker(savedPacketHex, lastResumeFrom, lastFoundType);
 
     if (result.found && result.roomName && result.key) {
       roomInput.value = result.roomName;

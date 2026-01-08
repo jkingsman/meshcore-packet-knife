@@ -5,9 +5,6 @@ import {
   PUBLIC_KEY,
   getChannelHash,
   verifyMac,
-  roomNameToIndex,
-  indexToRoomName,
-  countNamesForLength,
   isTimestampValid as coreIsTimestampValid,
   isValidUtf8 as coreIsValidUtf8,
   ProgressReport,
@@ -30,10 +27,12 @@ interface QueueItem {
   testedUpToLength?: number;
   maxLength: number;
   startFrom?: string;
+  startFromType?: 'dictionary' | 'bruteforce';
+  resumeFrom?: string;
+  resumeType?: 'dictionary' | 'bruteforce';
   progressPercent?: number;
   totalCandidates?: number;
   checkedCount?: number;
-  skipDictionary?: boolean;
   phase?: 'public-key' | 'wordlist' | 'bruteforce';
   error?: string;
 }
@@ -308,16 +307,22 @@ function retryWithHigherLimit(id: number): void {
     return;
   }
 
-  // Increase max length by 1, start from the next length
-  const newStartLength = (item.testedUpToLength || 1) + 1;
+  // Increase max length by 1, start from where we left off
   item.maxLength = (item.testedUpToLength || item.maxLength) + 1;
-  item.startFrom = `${'a'.repeat(newStartLength)}`; // Start of next length
+  // Use resume position if available, otherwise start at next length
+  if (item.resumeFrom) {
+    item.startFrom = item.resumeFrom;
+    item.startFromType = item.resumeType;
+  } else {
+    const newStartLength = (item.testedUpToLength || 1) + 1;
+    item.startFrom = 'a'.repeat(newStartLength);
+    item.startFromType = 'bruteforce';
+  }
   item.status = 'pending';
   item.testedUpTo = undefined;
   item.progressPercent = undefined;
   item.totalCandidates = undefined;
   item.checkedCount = undefined;
-  item.skipDictionary = true; // Already tried dictionary
   failedCount--;
 
   updateRow(item);
@@ -337,22 +342,11 @@ function skipAndContinue(id: number): void {
     removeKnownKey(item.channelHash);
   }
 
-  // Resume from the position after the false positive
-  if (item.roomName) {
-    const pos = roomNameToIndex(item.roomName);
-    if (pos) {
-      // Start from the next index after the false positive
-      let nextIndex = pos.index + 1;
-      let nextLength = pos.length;
-      // If we've exhausted this length, move to next
-      if (nextIndex >= countNamesForLength(pos.length)) {
-        nextLength = pos.length + 1;
-        nextIndex = 0;
-      }
-      // Compute the actual next room name to resume from
-      const nextName = indexToRoomName(nextLength, nextIndex);
-      item.startFrom = nextName || 'a'.repeat(nextLength);
-    }
+  // Resume from after the false positive using library's resume info
+  // Library v1.2.0+: startFrom means "start AFTER" (exclusive), and resumeFrom is set on success
+  if (item.resumeFrom) {
+    item.startFrom = item.resumeFrom;
+    item.startFromType = item.resumeType;
   }
 
   // Clear the cracked result
@@ -364,7 +358,6 @@ function skipAndContinue(id: number): void {
   item.progressPercent = undefined;
   item.totalCandidates = undefined;
   item.checkedCount = undefined;
-  item.skipDictionary = true;
   foundCount--;
 
   updateRow(item);
@@ -388,6 +381,9 @@ function tryKnownKeys(item: QueueItem): boolean {
       item.key = known.key;
       item.sender = result.sender;
       item.message = result.message;
+      // Set resume info for skip functionality
+      item.resumeFrom = known.roomName;
+      item.resumeType = 'bruteforce';
       foundCount++;
       return true;
     }
@@ -403,6 +399,9 @@ function tryKnownKeys(item: QueueItem): boolean {
       item.key = PUBLIC_KEY;
       item.sender = result.sender;
       item.message = result.message;
+      // Set resume info for skip functionality
+      item.resumeFrom = PUBLIC_ROOM_NAME;
+      item.resumeType = 'bruteforce';
       foundCount++;
       addKnownKey(item.channelHash, PUBLIC_ROOM_NAME, PUBLIC_KEY);
       return true;
@@ -430,7 +429,7 @@ async function processItem(item: QueueItem): Promise<void> {
         useTimestampFilter,
         useUtf8Filter: useUnicodeFilter,
         startFrom: item.startFrom,
-        useDictionary: !item.skipDictionary,
+        startFromType: item.startFromType,
       },
       (progress: ProgressReport) => {
         currentRate = progress.rateKeysPerSec;
@@ -457,6 +456,9 @@ async function processItem(item: QueueItem): Promise<void> {
       item.roomName = result.roomName;
       item.key = result.key;
       item.testedUpToLength = result.roomName.length;
+      // Save resume info for skip functionality - use values from library result
+      item.resumeFrom = result.resumeFrom || result.roomName;
+      item.resumeType = result.resumeType;
       if (decrypted.success && decrypted.data) {
         item.sender = decrypted.data.sender;
         item.message = decrypted.data.message;
@@ -466,6 +468,9 @@ async function processItem(item: QueueItem): Promise<void> {
     } else {
       item.status = 'failed';
       item.testedUpToLength = item.maxLength;
+      // Save resume info for retry functionality
+      item.resumeFrom = result.resumeFrom;
+      item.resumeType = result.resumeType;
       failedCount++;
     }
   } catch (e) {
