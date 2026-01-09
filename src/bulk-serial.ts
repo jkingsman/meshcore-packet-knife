@@ -12,7 +12,8 @@ import {
   ProgressReport,
 } from 'meshcore-hashtag-cracker';
 import { ENGLISH_WORDLIST } from 'meshcore-hashtag-cracker/wordlist';
-import { escapeHtml, formatTime, formatRate } from './utils';
+import { escapeHtml, formatRate } from './utils';
+import { renderQueueItemRow } from './render-utils';
 import {
   loadKnownKeysFromStorage,
   getKnownKeys,
@@ -340,76 +341,9 @@ function updateLastPacketTimeDisplay(): void {
   }
 }
 
-// Render a single row
+// Render a single row (delegates to pure render-utils)
 function renderRow(item: QueueItem): string {
-  let statusClass = '';
-  let statusText = '';
-  let resultText = '';
-  let actionsHtml = '';
-
-  switch (item.status) {
-    case 'pending':
-      statusClass = 'status-pending';
-      statusText = `Pending (max ${item.maxLength})`;
-      resultText = '-';
-      break;
-    case 'processing': {
-      statusClass = 'status-processing';
-      const pct = item.progressPercent ?? 0;
-      statusText = `Processing ${pct.toFixed(1)}%`;
-
-      if (item.phase === 'wordlist') {
-        resultText = `dict: ${escapeHtml(item.testedUpTo || '')}`;
-      } else {
-        let etaText = '';
-        if (
-          currentRate > 0 &&
-          item.totalCandidates &&
-          item.checkedCount !== undefined &&
-          item.checkedCount > 0
-        ) {
-          const remaining = item.totalCandidates - item.checkedCount;
-          const etaSeconds = remaining / currentRate;
-          etaText = `; ETA ${formatTime(etaSeconds)}`;
-        }
-        const lengthText = item.testedUpToLength
-          ? `GPU length ${item.testedUpToLength}`
-          : 'Starting';
-        resultText = `${lengthText}${etaText}`;
-      }
-      break;
-    }
-    case 'found':
-      statusClass = 'status-found';
-      statusText = 'Found';
-      resultText = item.sender
-        ? `<strong>${escapeHtml(item.sender)}:</strong> ${escapeHtml(item.message || '')}`
-        : escapeHtml(item.message || '');
-      actionsHtml = `
-        <button class="action-btn skip-btn" data-id="${item.id}" title="Skip this result (MAC collision) and continue searching">Skip this match and keep looking</button>
-      `;
-      break;
-    case 'failed':
-      statusClass = 'status-failed';
-      statusText = 'Not found';
-      resultText = `No key found of length ${item.testedUpToLength || '?'}`;
-      actionsHtml = `
-        <button class="action-btn retry-btn" data-id="${item.id}" title="Retry with higher max length">Retry +1</button>
-      `;
-      break;
-  }
-
-  const packetPreview = item.packetHex.substring(0, 32) + (item.packetHex.length > 32 ? '...' : '');
-
-  return `
-    <tr data-id="${item.id}">
-      <td>${item.id}</td>
-      <td class="${statusClass}">${statusText}</td>
-      <td class="mono packet-preview" title="${escapeHtml(item.packetHex)}">${escapeHtml(packetPreview)}</td>
-      <td class="mono">${item.roomName ? '#' + escapeHtml(item.roomName) : '-'}</td>
-      <td class="message-cell">${resultText}${actionsHtml ? '<div class="action-btns">' + actionsHtml + '</div>' : ''}</td>
-    </tr>
-  `;
+  return renderQueueItemRow(item, currentRate);
 }
 
 // Update a single row in the table
