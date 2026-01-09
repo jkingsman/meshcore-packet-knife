@@ -11,7 +11,15 @@ import {
   PUBLIC_KEY,
   ProgressReport,
 } from 'meshcore-hashtag-cracker';
-import { escapeHtml } from './utils';
+import { ENGLISH_WORDLIST } from 'meshcore-hashtag-cracker/wordlist';
+import { escapeHtml, formatTime, formatRate } from './utils';
+import {
+  loadKnownKeysFromStorage,
+  getKnownKeys,
+  addKnownKey,
+  removeKnownKey,
+  tryKnownKeys,
+} from './known-keys';
 
 // Types
 interface QueueItem {
@@ -41,50 +49,8 @@ interface QueueItem {
 
 // State
 const queue: QueueItem[] = [];
-const knownKeys: Map<string, { roomName: string; key: string }> = new Map();
 const seenPackets: Set<string> = new Set(); // For duplicate detection
 
-// LocalStorage key for persisting known room keys
-const KNOWN_KEYS_STORAGE_KEY = 'meshcore-known-room-keys';
-
-// Load known keys from localStorage
-function loadKnownKeysFromStorage(): void {
-  try {
-    const stored = localStorage.getItem(KNOWN_KEYS_STORAGE_KEY);
-    if (stored) {
-      const entries: [string, { roomName: string; key: string }][] = JSON.parse(stored);
-      for (const [channelHash, value] of entries) {
-        knownKeys.set(channelHash, value);
-      }
-    }
-  } catch {
-    // Ignore parse errors, start with empty map
-  }
-}
-
-// Save known keys to localStorage
-function saveKnownKeysToStorage(): void {
-  try {
-    const entries = Array.from(knownKeys.entries());
-    localStorage.setItem(KNOWN_KEYS_STORAGE_KEY, JSON.stringify(entries));
-  } catch {
-    // Ignore storage errors (e.g., quota exceeded)
-  }
-}
-
-// Add a known key (and persist)
-function addKnownKey(channelHash: string, roomName: string, key: string): void {
-  knownKeys.set(channelHash, { roomName, key });
-  saveKnownKeysToStorage();
-  updateKnownKeysDisplay();
-}
-
-// Remove a known key (and persist)
-function removeKnownKey(channelHash: string): void {
-  knownKeys.delete(channelHash);
-  saveKnownKeysToStorage();
-  updateKnownKeysDisplay();
-}
 let nextId = 1;
 let isProcessing = false;
 let cracker: GroupTextCracker | null = null;
@@ -105,7 +71,7 @@ let lastPacketTime: Date | null = null;
 
 // Filter settings
 let useTimestampFilter = true;
-let useUnicodeFilter = true;
+let useUtf8Filter = true;
 let autoRetryEnabled = false;
 let autoRetryIntervalId: number | null = null;
 
@@ -176,54 +142,9 @@ let connectionStatusEl: HTMLElement;
 let packetsReceivedEl: HTMLElement;
 let lastPacketTimeEl: HTMLElement;
 
-// Try to decrypt with a known key (verify MAC, but no content filtering - library handles that during crack())
-function tryDecryptWithKey(
-  ciphertext: string,
-  cipherMac: string,
-  keyHex: string,
-): { valid: boolean; sender?: string; message?: string } {
-  // Verify MAC first to confirm the key is correct
-  if (!verifyMac(ciphertext, cipherMac, keyHex)) {
-    return { valid: false };
-  }
-  // Decrypt to get sender/message for display
-  const result = ChannelCrypto.decryptGroupTextMessage(ciphertext, cipherMac, keyHex);
-  if (!result.success || !result.data) {
-    return { valid: false };
-  }
-  return { valid: true, sender: result.data.sender, message: result.data.message };
-}
-
-// Formatting helpers
-function formatTime(seconds: number): string {
-  if (seconds < 60) {
-    return `${Math.round(seconds)}s`;
-  }
-  if (seconds < 3600) {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.round(seconds % 60);
-    return `${mins}m ${secs}s`;
-  }
-  const hours = Math.floor(seconds / 3600);
-  const mins = Math.round((seconds % 3600) / 60);
-  return `${hours}h ${mins}m`;
-}
-
-function formatRate(rate: number): string {
-  if (rate >= 1000000000) {
-    return `${(rate / 1000000000).toFixed(2)} Gkeys/s`;
-  }
-  if (rate >= 1000000) {
-    return `${(rate / 1000000).toFixed(2)} Mkeys/s`;
-  }
-  if (rate >= 1000) {
-    return `${(rate / 1000).toFixed(1)} kkeys/s`;
-  }
-  return `${rate} keys/s`;
-}
-
 // Update known keys display
 function updateKnownKeysDisplay(): void {
+  const knownKeys = getKnownKeys();
   if (knownKeys.size === 0) {
     knownKeysEl.style.display = 'none';
     return;
@@ -265,6 +186,7 @@ function addRoomNameFromConsole(roomName: string): void {
   const channelHash = getChannelHash(key);
 
   // Check if already exists
+  const knownKeys = getKnownKeys();
   const existing = knownKeys.get(channelHash);
   if (existing) {
     console.log(`Room #${cleanName} already exists with key ${key}`);
@@ -273,6 +195,7 @@ function addRoomNameFromConsole(roomName: string): void {
 
   // Add to known keys
   addKnownKey(channelHash, cleanName, key);
+  updateKnownKeysDisplay();
   console.log(`Added room #${cleanName} with key ${key} (channel hash: ${channelHash})`);
 }
 
@@ -302,6 +225,7 @@ function removeRoomNameFromConsole(roomName: string): void {
   const channelHash = getChannelHash(key);
 
   // Check if it exists
+  const knownKeys = getKnownKeys();
   const existing = knownKeys.get(channelHash);
   if (!existing) {
     console.log(`Room #${cleanName} not found in known keys`);
@@ -310,6 +234,7 @@ function removeRoomNameFromConsole(roomName: string): void {
 
   // Remove from known keys
   removeKnownKey(channelHash);
+  updateKnownKeysDisplay();
   console.log(`Removed room #${cleanName} with key ${key} (channel hash: ${channelHash})`);
 }
 
@@ -567,7 +492,6 @@ function skipAndContinue(id: number): void {
   }
 
   // Resume from after the false positive using library's resume info
-  // Library v1.2.0+: startFrom means "start AFTER" (exclusive), and resumeFrom is set on success
   if (item.resumeFrom) {
     item.startFrom = item.resumeFrom;
     item.startFromType = item.resumeType;
@@ -628,47 +552,24 @@ function checkAutoRetry(): void {
   retryWithHigherLimit(randomItem.id);
 }
 
-// Try known keys on a packet
-function tryKnownKeys(item: QueueItem): boolean {
+// Try known keys on a packet (fast path - skips cracking if we already know the key)
+function tryKnownKeysOnItem(item: QueueItem): boolean {
   if (!item.channelHash || !item.ciphertext || !item.cipherMac) {
     return false;
   }
 
-  // Check if we have a known key for this channel hash
-  const known = knownKeys.get(item.channelHash);
-  if (known) {
-    const result = tryDecryptWithKey(item.ciphertext, item.cipherMac, known.key);
-    if (result.valid) {
-      item.status = 'found';
-      item.roomName = known.roomName;
-      item.key = known.key;
-      item.sender = result.sender;
-      item.message = result.message;
-      // Set resume info for skip functionality
-      item.resumeFrom = known.roomName;
-      item.resumeType = 'bruteforce';
-      foundCount++;
-      return true;
-    }
-  }
-
-  // Also try public key
-  const publicChannelHash = getChannelHash(PUBLIC_KEY);
-  if (item.channelHash === publicChannelHash) {
-    const result = tryDecryptWithKey(item.ciphertext, item.cipherMac, PUBLIC_KEY);
-    if (result.valid) {
-      item.status = 'found';
-      item.roomName = PUBLIC_ROOM_NAME;
-      item.key = PUBLIC_KEY;
-      item.sender = result.sender;
-      item.message = result.message;
-      // Set resume info for skip functionality
-      item.resumeFrom = PUBLIC_ROOM_NAME;
-      item.resumeType = 'bruteforce';
-      foundCount++;
-      addKnownKey(item.channelHash, PUBLIC_ROOM_NAME, PUBLIC_KEY);
-      return true;
-    }
+  const match = tryKnownKeys(item.channelHash, item.ciphertext, item.cipherMac);
+  if (match.found && match.roomName && match.key) {
+    item.status = 'found';
+    item.roomName = match.roomName;
+    item.key = match.key;
+    item.sender = match.sender;
+    item.message = match.message;
+    // Set resume info for skip functionality
+    item.resumeFrom = match.roomName;
+    item.resumeType = 'bruteforce';
+    foundCount++;
+    return true;
   }
 
   return false;
@@ -688,7 +589,7 @@ async function processItem(item: QueueItem): Promise<void> {
     const crackOptions = {
       maxLength: item.maxLength,
       useTimestampFilter,
-      useUtf8Filter: useUnicodeFilter,
+      useUtf8Filter,
       startFrom: item.startFrom,
       startFromType: item.startFromType,
     };
@@ -711,7 +612,7 @@ async function processItem(item: QueueItem): Promise<void> {
       item.roomName = result.roomName;
       item.key = result.key;
       item.testedUpToLength = result.roomName.length;
-      // Save resume info for skip functionality - use values from library result
+      // Save resume info for skip functionality
       item.resumeFrom = result.resumeFrom || result.roomName;
       item.resumeType = result.resumeType;
 
@@ -768,7 +669,7 @@ async function processQueue(): Promise<void> {
     updateStatusBar();
 
     // First try known keys
-    if (tryKnownKeys(item)) {
+    if (tryKnownKeysOnItem(item)) {
       updateRow(item);
       updateStatusBar();
       updateKnownKeysDisplay();
@@ -1005,7 +906,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Filter toggles
   const timestampFilter = document.getElementById('timestamp-filter') as HTMLInputElement | null;
-  const unicodeFilter = document.getElementById('unicode-filter') as HTMLInputElement | null;
+  const utf8Filter = document.getElementById('unicode-filter') as HTMLInputElement | null;
 
   if (timestampFilter) {
     timestampFilter.checked = useTimestampFilter;
@@ -1014,10 +915,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  if (unicodeFilter) {
-    unicodeFilter.checked = useUnicodeFilter;
-    unicodeFilter.addEventListener('change', () => {
-      useUnicodeFilter = unicodeFilter.checked;
+  if (utf8Filter) {
+    utf8Filter.checked = useUtf8Filter;
+    utf8Filter.addEventListener('change', () => {
+      useUtf8Filter = utf8Filter.checked;
     });
   }
 
@@ -1050,18 +951,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Initialize cracker
+  // Initialize cracker with bundled wordlist
   cracker = new GroupTextCracker();
+  cracker.setWordlist(ENGLISH_WORDLIST);
 
-  // Load wordlist for dictionary attacks
-  try {
-    await cracker.loadWordlist('./words_alpha.txt');
-    crackerStatus.textContent = 'Cracker: Ready';
-    crackerStatus.classList.add('success');
-  } catch {
-    crackerStatus.textContent = 'Cracker: Ready (no wordlist)';
-    crackerStatus.classList.add('warning');
-  }
+  crackerStatus.textContent = 'Cracker: Ready';
+  crackerStatus.classList.add('success');
 
   // Serial button handlers
   connectBtn.addEventListener('click', connectToRadio);

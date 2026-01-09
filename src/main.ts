@@ -11,9 +11,11 @@ import {
   deriveKeyFromRoomName,
   PUBLIC_ROOM_NAME,
   PUBLIC_KEY,
+  CrackResult,
   ProgressReport,
 } from 'meshcore-hashtag-cracker';
-import { escapeHtml } from './utils';
+import { ENGLISH_WORDLIST } from 'meshcore-hashtag-cracker/wordlist';
+import { escapeHtml, formatTimeCompact, formatRate } from './utils';
 
 // Cracker instance
 let cracker: GroupTextCracker | null = null;
@@ -21,42 +23,12 @@ let cracker: GroupTextCracker | null = null;
 // Brute force state
 let bruteForceRunning = false;
 let savedPacketHex = '';
-let lastFoundType: 'dictionary' | 'bruteforce' | undefined;
-let lastResumeFrom = ''; // Position to resume from after a match
+let lastResumeFrom = '';
+let lastResumeType: 'dictionary' | 'bruteforce' | undefined;
 
 // Filter options
 let useTimestampFilter = true;
-let useUnicodeFilter = true;
-
-// Formatting helpers
-function formatTime(seconds: number): string {
-  if (seconds < 60) {
-    return `${Math.round(seconds)}s`;
-  }
-  if (seconds < 3600) {
-    const m = Math.floor(seconds / 60);
-    const s = Math.round(seconds % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  }
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return `${h}:${m.toString().padStart(2, '0')}:${Math.round(seconds % 60)
-    .toString()
-    .padStart(2, '0')}`;
-}
-
-function formatRate(rate: number): string {
-  if (rate >= 1000000000) {
-    return `${(rate / 1000000000).toFixed(2)} Gkeys/s`;
-  }
-  if (rate >= 1000000) {
-    return `${(rate / 1000000).toFixed(2)} Mkeys/s`;
-  }
-  if (rate >= 1000) {
-    return `${(rate / 1000).toFixed(1)} kkeys/s`;
-  }
-  return `${rate} keys/s`;
-}
+let useUtf8Filter = true;
 
 // Brute force UI state helpers
 function getBruteForceElements() {
@@ -102,7 +74,7 @@ async function runCracker(
   packetHex: string,
   startFrom?: string,
   startFromType?: 'dictionary' | 'bruteforce',
-): Promise<{ found: boolean; roomName?: string; key?: string }> {
+): Promise<CrackResult> {
   if (!cracker) {
     return { found: false };
   }
@@ -117,7 +89,7 @@ async function runCracker(
       {
         maxLength: 20,
         useTimestampFilter,
-        useUtf8Filter: useUnicodeFilter,
+        useUtf8Filter,
         startFrom,
         startFromType,
       },
@@ -127,15 +99,15 @@ async function runCracker(
           progress.phase === 'wordlist'
             ? `dict: ${escapeHtml(progress.currentPosition)}`
             : `GPU length ${progress.currentLength}`;
-        // Sanity check ETA - if > 1 year, progress tracking is likely wrong (e.g., resumed search)
+        // Sanity check ETA - if > 1 year, progress tracking is likely wrong
         const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
         const etaReasonable = progress.etaSeconds < ONE_YEAR_SECONDS && progress.percent > 0;
         const progressLine = etaReasonable
-          ? `<div class="stat">${progress.percent.toFixed(1)}% complete, ~${formatTime(progress.etaSeconds)} remaining</div>`
+          ? `<div class="stat">${progress.percent.toFixed(1)}% complete, ~${formatTimeCompact(progress.etaSeconds)} remaining</div>`
           : `<div class="stat">Searching length ${progress.currentLength}...</div>`;
         statusEl.innerHTML =
           `<div class="stat">Mode: ${modeText}</div>` +
-          `<div class="stat">Elapsed: ${formatTime(progress.elapsedSeconds)} | Checked: ${progress.checked.toLocaleString()} keys (${formatRate(progress.rateKeysPerSec)})</div>` +
+          `<div class="stat">Elapsed: ${formatTimeCompact(progress.elapsedSeconds)} | Checked: ${progress.checked.toLocaleString()} keys (${formatRate(progress.rateKeysPerSec)})</div>` +
           progressLine;
       },
     );
@@ -144,29 +116,28 @@ async function runCracker(
       statusEl.innerHTML =
         `<div class="stat found">Found: #${escapeHtml(result.roomName)}</div>` +
         `<div class="stat">Key: ${result.key}</div>`;
-      // Save found info for skip functionality - use result.resumeType from library
-      lastFoundType = result.resumeType;
-      // Use resumeFrom from result (correct position to resume from after this match)
+      // Save resume info for skip functionality
       lastResumeFrom = result.resumeFrom || result.roomName;
+      lastResumeType = result.resumeType;
       saveResumePosition(lastResumeFrom);
       finishBruteForceUI(true);
-      return { found: true, roomName: result.roomName, key: result.key };
+      return result;
     }
 
     if (result.aborted) {
       saveResumePosition(result.resumeFrom || '');
       finishBruteForceUI(!!result.resumeFrom);
-      return { found: false };
+      return result;
     }
 
     // Not found
     finishBruteForceUI(false);
     statusEl.innerHTML = '<div class="stat warning">Room name not found within search limits</div>';
-    return { found: false };
+    return result;
   } catch (e) {
     finishBruteForceUI(false);
     statusEl.innerHTML = `<div class="stat error">Error: ${escapeHtml((e as Error).message)}</div>`;
-    return { found: false };
+    return { found: false, error: (e as Error).message };
   }
 }
 
@@ -358,8 +329,8 @@ async function analyze(): Promise<void> {
     lastPacket = null;
     lastPacketHex = '';
     autoDetectedPublic = false;
-    lastFoundType = undefined;
     lastResumeFrom = '';
+    lastResumeType = undefined;
     return;
   }
 
@@ -424,22 +395,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const bruteBtn = document.getElementById('brute-btn') as HTMLButtonElement;
   const statusEl = document.getElementById('brute-status')!;
 
-  // Initialize cracker
+  // Initialize cracker with bundled wordlist
   const crackerStatus = document.getElementById('cracker-status');
   cracker = new GroupTextCracker();
+  cracker.setWordlist(ENGLISH_WORDLIST);
 
-  // Load wordlist for dictionary attacks
-  try {
-    await cracker.loadWordlist('./words_alpha.txt');
-    if (crackerStatus) {
-      crackerStatus.textContent = 'Cracker: Ready';
-      crackerStatus.classList.add('success');
-    }
-  } catch {
-    if (crackerStatus) {
-      crackerStatus.textContent = 'Cracker: Ready (no wordlist)';
-      crackerStatus.classList.add('warning');
-    }
+  if (crackerStatus) {
+    crackerStatus.textContent = 'Cracker: Ready';
+    crackerStatus.classList.add('success');
   }
 
   // Timestamp filter toggle handler
@@ -451,12 +414,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Unicode filter toggle handler
-  const unicodeFilter = document.getElementById('unicode-filter') as HTMLInputElement | null;
-  if (unicodeFilter) {
-    unicodeFilter.checked = useUnicodeFilter;
-    unicodeFilter.addEventListener('change', () => {
-      useUnicodeFilter = unicodeFilter.checked;
+  // UTF-8 filter toggle handler
+  const utf8Filter = document.getElementById('unicode-filter') as HTMLInputElement | null;
+  if (utf8Filter) {
+    utf8Filter.checked = useUtf8Filter;
+    utf8Filter.addEventListener('change', () => {
+      useUtf8Filter = utf8Filter.checked;
     });
   }
 
@@ -565,8 +528,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     analyze();
 
     // Resume search from the position after the false positive
-    // Use lastResumeFrom which is the correct resume position from the library
-    const result = await runCracker(savedPacketHex, lastResumeFrom, lastFoundType);
+    const result = await runCracker(savedPacketHex, lastResumeFrom, lastResumeType);
 
     if (result.found && result.roomName && result.key) {
       roomInput.value = result.roomName;

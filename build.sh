@@ -95,5 +95,5 @@ npx esbuild src/network-finder.ts \
   --external:child_process \
   --external:@serialport/*
 
-# Copy HTML, CSS, and wordlist to dist
-cp index.html bulk.html bulk-serial.html radio-config.html raw-packets.html network-finder.html styles.css words_alpha.txt dist/
+# Copy HTML and CSS to dist (wordlist is now bundled in the library)
+cp index.html bulk.html bulk-serial.html radio-config.html raw-packets.html network-finder.html styles.css dist/
