@@ -73,6 +73,7 @@ let lastPacketTime: Date | null = null;
 // Filter settings
 let useTimestampFilter = true;
 let useUtf8Filter = true;
+let useSenderFilter = true;
 let autoRetryEnabled = false;
 let autoRetryIntervalId: number | null = null;
 
@@ -524,6 +525,7 @@ async function processItem(item: QueueItem): Promise<void> {
       maxLength: item.maxLength,
       useTimestampFilter,
       useUtf8Filter,
+      useSenderFilter,
       startFrom: item.startFrom,
       startFromType: item.startFromType,
     };
@@ -853,6 +855,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     utf8Filter.checked = useUtf8Filter;
     utf8Filter.addEventListener('change', () => {
       useUtf8Filter = utf8Filter.checked;
+    });
+  }
+
+  // Sender filter toggle
+  const senderFilter = document.getElementById('sender-filter') as HTMLInputElement | null;
+  if (senderFilter) {
+    senderFilter.checked = useSenderFilter;
+    senderFilter.addEventListener('change', () => {
+      useSenderFilter = senderFilter.checked;
     });
   }
 

@@ -29,6 +29,7 @@ let lastResumeType: 'dictionary' | 'bruteforce' | undefined;
 // Filter options
 let useTimestampFilter = true;
 let useUtf8Filter = true;
+let useSenderFilter = true;
 
 // Brute force UI state helpers
 function getBruteForceElements() {
@@ -90,6 +91,7 @@ async function runCracker(
         maxLength: 20,
         useTimestampFilter,
         useUtf8Filter,
+        useSenderFilter,
         startFrom,
         startFromType,
       },
@@ -420,6 +422,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     utf8Filter.checked = useUtf8Filter;
     utf8Filter.addEventListener('change', () => {
       useUtf8Filter = utf8Filter.checked;
+    });
+  }
+
+  // Sender filter toggle handler
+  const senderFilter = document.getElementById('sender-filter') as HTMLInputElement | null;
+  if (senderFilter) {
+    senderFilter.checked = useSenderFilter;
+    senderFilter.addEventListener('change', () => {
+      useSenderFilter = senderFilter.checked;
     });
   }
 
