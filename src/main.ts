@@ -27,7 +27,7 @@ let lastResumeFrom = '';
 let lastResumeType: 'dictionary' | 'bruteforce' | undefined;
 
 // Filter options
-let useTimestampFilter = true;
+let useTimestampFilter = false;
 let useUtf8Filter = true;
 let useSenderFilter = true;
 
